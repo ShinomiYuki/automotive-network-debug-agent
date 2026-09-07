@@ -1,0 +1,32 @@
+# 本文件负责定义 Python 项目的基础元数据与依赖。
+# 当前只保留 Trace MCP 一期需要的核心依赖；后续 CANoe 相关依赖应放入可选组。
+
+[project]
+name = "automotive-network-debug-agent"
+version = "0.1.0"
+description = "A Multi-Source Data-Driven Agent for Automotive Network Fault Diagnosis"
+requires-python = ">=3.11"
+dependencies = [
+    "python-can>=4.4",
+    "cantools>=39.4",
+    "fastmcp>=2.0",
+    "pydantic>=2.8",
+]
+
+[project.optional-dependencies]
+agents = [
+    "openai-agents>=0.1",
+]
+
+canoe = [
+    # TODO：后续 CANoe MCP 实现时补充 py-canoe 等依赖。
+]
+
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
