@@ -29,3 +29,6 @@ input/
 
 # vscode配置
 .vscode/
+
+# 本机 Trace MCP Python 解释器路径（不得提交绝对路径）
+.codex/python-path.txt

@@ -5,6 +5,7 @@
 name = "automotive-network-debug-agent"
 version = "0.1.0"
 description = "A Multi-Source Data-Driven Agent for Automotive Network Fault Diagnosis"
+license = "AGPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
     "python-can>=4.4",
@@ -14,10 +15,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-agents = [
-    "openai-agents>=0.1",
-]
-
 canoe = [
     # TODO：后续 CANoe MCP 实现时补充 py-canoe 等依赖。
 ]

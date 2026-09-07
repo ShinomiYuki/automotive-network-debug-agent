@@ -1,0 +1,50 @@
+{
+  "description": "Trace Agent 的 Harness 原生验收用例；不实现或模拟模型推理。",
+  "required_output_sections": [
+    "现象判断",
+    "关键证据",
+    "不确定项",
+    "下一步建议"
+  ],
+  "cases": [
+    {
+      "id": "message_exists_on_channel",
+      "question": "在给定 BLF 的 CAN1 上是否出现过 0x100？",
+      "expected_tool_plan": ["load_trace", "find_messages"],
+      "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal"]
+    },
+    {
+      "id": "message_missing_on_requested_channel",
+      "question": "为什么 CAN2 上看不到 0x100？",
+      "expected_tool_plan": ["load_trace", "find_messages", "find_messages"],
+      "plan_note": "第二次 find_messages 仅在指定 Channel 结果为零时去掉 Channel 限制，并保留相同时间范围。",
+      "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal"]
+    },
+    {
+      "id": "message_timing",
+      "question": "CAN2 上 0x200 的周期和最大间隔是多少？",
+      "expected_tool_plan": ["load_trace", "get_message_timing"],
+      "forbidden_tools": ["get_trace_summary", "search_database", "decode_signal"]
+    },
+    {
+      "id": "signal_decode_with_database",
+      "question": "使用给定 DBC 查看 VehicleSpeed 信号值。",
+      "expected_tool_plan": ["load_trace", "search_database", "decode_signal"],
+      "forbidden_tools": ["get_trace_summary", "get_message_timing"]
+    },
+    {
+      "id": "signal_decode_without_database",
+      "question": "未提供 DBC 时查看 VehicleSpeed 信号值。",
+      "expected_tool_plan": [],
+      "plan_note": "缺少信号映射时应请求 DBC/ARXML，不加载日志或盲猜 CAN ID。",
+      "forbidden_tools": ["load_trace", "get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal"]
+    },
+    {
+      "id": "insufficient_root_cause_evidence",
+      "question": "0x100 在 CAN2 上没有出现，是否能确定是 PduR 配置错误？",
+      "expected_tool_plan": ["load_trace", "find_messages", "find_messages"],
+      "plan_note": "只确认 Trace 现象，并明确单凭 Trace 不能定位 PduR 根因。",
+      "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal"]
+    }
+  ]
+}

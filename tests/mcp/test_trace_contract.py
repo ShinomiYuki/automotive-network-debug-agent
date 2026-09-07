@@ -19,6 +19,7 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
                 "get_trace_summary",
                 "find_messages",
                 "get_message_timing",
+                "search_database",
                 "decode_signal",
             }
 
@@ -45,12 +46,16 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
                 "get_message_timing",
                 {"trace_id": trace_id, "arbitration_id": 0x100, "channel": 1},
             )
+            database_match = await client.call_tool(
+                "search_database",
+                {"trace_id": trace_id, "query": "VehicleSpeed"},
+            )
             signal = await client.call_tool(
                 "decode_signal",
                 {
                     "trace_id": trace_id,
                     "arbitration_id": 0x100,
-                    "signal_name": "EngineSpeed",
+                    "signal_name": "VehicleSpeed",
                     "limit": 2,
                 },
             )
@@ -59,6 +64,8 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
             assert messages.data["returned_count"] == MAX_FRAME_RESULTS
             assert len(messages.data["frames"]) == MAX_FRAME_RESULTS
             assert timing.data["period_median_ms"] is not None
+            assert database_match.data["matches"][0]["arbitration_id"] == 0x100
+            assert database_match.data["matches"][0]["signal_name_exact"] is True
             assert signal.data["returned_count"] == 2
 
     asyncio.run(exercise_tools())

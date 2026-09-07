@@ -66,6 +66,12 @@ def get_message_timing(
 
 
 @mcp.tool()
+def search_database(trace_id: str, query: str, limit: int = 20) -> dict:
+    """按报文名或信号名搜索有限 DBC/ARXML 候选，供后续精确查询。"""
+    return sessions.search_database(trace_id=trace_id, query=query, limit=limit)
+
+
+@mcp.tool()
 def decode_signal(
     trace_id: str,
     arbitration_id: int,

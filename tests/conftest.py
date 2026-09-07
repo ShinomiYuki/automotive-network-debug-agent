@@ -24,6 +24,7 @@ BU_: ECU
 
 BO_ 256 EngineData: 8 ECU
  SG_ EngineSpeed : 0|16@1+ (0.125,0) [0|8000] "rpm" ECU
+ SG_ VehicleSpeed : 16|16@1+ (0.01,0) [0|250] "km/h" ECU
 """,
         encoding="ascii",
     )

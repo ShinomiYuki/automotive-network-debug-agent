@@ -43,6 +43,46 @@ class NetworkDatabase:
                 f"CAN ID 0x{arbitration_id:X} 中不存在信号: {signal_name}"
             )
 
+    def search(self, query: str) -> list[dict]:
+        """按报文名或信号名搜索轻量候选，不返回整个数据库。"""
+        normalized_query = query.casefold()
+        results = []
+        for message in self.db.messages:
+            message_name = message.name
+            matched_signals = [
+                signal.name
+                for signal in message.signals
+                if normalized_query in signal.name.casefold()
+            ]
+            message_matched = normalized_query in message_name.casefold()
+            if not message_matched and not matched_signals:
+                continue
+
+            exact_signal = any(
+                signal_name.casefold() == normalized_query
+                for signal_name in matched_signals
+            )
+            exact_message = message_name.casefold() == normalized_query
+            results.append(
+                {
+                    "arbitration_id": message.frame_id,
+                    "arbitration_id_hex": f"0x{message.frame_id:X}",
+                    "message_name": message_name,
+                    "message_name_exact": exact_message,
+                    "matched_signal_names": matched_signals,
+                    "signal_name_exact": exact_signal,
+                }
+            )
+
+        return sorted(
+            results,
+            key=lambda item: (
+                not item["signal_name_exact"],
+                not item["message_name_exact"],
+                item["arbitration_id"],
+            ),
+        )
+
     def decode(self, arbitration_id: int, data: bytes) -> dict:
         message = self.get_message(arbitration_id)
         try:

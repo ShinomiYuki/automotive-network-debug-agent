@@ -1,0 +1,8 @@
+# 本文件为受信任项目注册 Trace MCP；模型推理由 Codex/Harness 提供。
+
+[mcp_servers.automotive-trace]
+command = "pwsh"
+args = ["-NoLogo", "-NoProfile", "-File", "scripts/run_trace_mcp.ps1"]
+cwd = "."
+startup_timeout_sec = 20
+tool_timeout_sec = 60

@@ -159,3 +159,48 @@ def test_decode_signal_rejects_unknown_signal_and_can_id(trace_files):
         manager.decode_signal(trace_id, 0x100, "MissingSignal")
     with pytest.raises(TraceDatabaseError, match="不存在 CAN ID"):
         manager.decode_signal(trace_id, 0x999, "EngineSpeed")
+
+
+def test_search_database_resolves_signal_and_caps_results(trace_files):
+    blf_path, dbc_path = trace_files
+    manager = TraceSessionManager()
+    trace_id = manager.load_trace(str(blf_path), str(dbc_path))["trace_id"]
+
+    exact = manager.search_database(trace_id, "VehicleSpeed", limit=100)
+    case_variant = manager.search_database(trace_id, "vehiclespeed")
+    partial = manager.search_database(trace_id, "speed")
+    missing = manager.search_database(trace_id, "MissingSignal")
+
+    assert exact["total_count"] == 1
+    assert exact["limit_applied"] == 20
+    assert exact["matches"] == [
+        {
+            "arbitration_id": 0x100,
+            "arbitration_id_hex": "0x100",
+            "message_name": "EngineData",
+            "message_name_exact": False,
+            "matched_signal_names": ["VehicleSpeed"],
+            "signal_name_exact": True,
+        }
+    ]
+    assert case_variant["matches"][0]["matched_signal_names"] == ["VehicleSpeed"]
+    assert case_variant["matches"][0]["signal_name_exact"] is True
+    assert partial["total_count"] == 1
+    assert partial["matches"][0]["matched_signal_names"] == [
+        "EngineSpeed",
+        "VehicleSpeed",
+    ]
+    assert missing["matches"] == []
+
+
+def test_search_database_rejects_missing_database_and_invalid_query(trace_files):
+    blf_path, _ = trace_files
+    manager = TraceSessionManager()
+    trace_id = manager.load_trace(str(blf_path))["trace_id"]
+
+    with pytest.raises(TraceDatabaseError, match="未加载"):
+        manager.search_database(trace_id, "VehicleSpeed")
+    with pytest.raises(TraceInputError, match="query"):
+        manager.search_database(trace_id, " ")
+    with pytest.raises(TraceInputError, match="limit"):
+        manager.search_database(trace_id, "VehicleSpeed", limit=0)

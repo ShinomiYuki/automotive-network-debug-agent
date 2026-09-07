@@ -20,6 +20,7 @@ from anda.trace.timing import analyze_timestamps
 
 MAX_FRAME_RESULTS = 200
 MAX_SIGNAL_RESULTS = 200
+MAX_DATABASE_RESULTS = 20
 
 
 @dataclass(slots=True)
@@ -258,6 +259,32 @@ class TraceSessionManager:
             "min": numeric_min,
             "max": numeric_max,
             "samples": samples,
+        }
+
+    def search_database(
+        self, trace_id: str, query: str, limit: int = MAX_DATABASE_RESULTS
+    ) -> dict:
+        """搜索报文名或信号名，为后续精确解码提供有限候选。"""
+        normalized_query = query.strip()
+        if not normalized_query:
+            raise TraceInputError("query 不能为空")
+        if limit < 1:
+            raise TraceInputError("limit 必须大于等于 1")
+
+        session = self._get(trace_id)
+        database = session.database
+        if database is None:
+            raise TraceDatabaseError("当前 Trace 未加载 DBC/ARXML 数据库")
+
+        matches = database.search(normalized_query)
+        applied_limit = min(limit, MAX_DATABASE_RESULTS)
+        return {
+            "trace_id": trace_id,
+            "query": normalized_query,
+            "total_count": len(matches),
+            "returned_count": min(len(matches), applied_limit),
+            "limit_applied": applied_limit,
+            "matches": matches[:applied_limit],
         }
 
     @staticmethod
