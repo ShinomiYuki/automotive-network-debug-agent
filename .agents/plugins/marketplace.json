@@ -1,0 +1,20 @@
+{
+  "name": "shinomi-yuki",
+  "interface": {
+    "displayName": "ShinomiYuki"
+  },
+  "plugins": [
+    {
+      "name": "automotive-network-debug-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/automotive-network-debug-agent"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

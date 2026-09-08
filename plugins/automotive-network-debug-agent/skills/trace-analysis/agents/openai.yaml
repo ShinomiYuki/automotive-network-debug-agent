@@ -1,0 +1,7 @@
+interface:
+  display_name: "Trace Analysis"
+  short_description: "使用本地 BLF 与 DBC 调查汽车网络 Trace 现象"
+  default_prompt: "使用 $trace-analysis 分析我提供的 BLF、可选 DBC 和问题描述。"
+
+policy:
+  allow_implicit_invocation: true

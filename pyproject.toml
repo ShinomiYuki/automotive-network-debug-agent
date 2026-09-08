@@ -3,7 +3,7 @@
 
 [project]
 name = "automotive-network-debug-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Multi-Source Data-Driven Agent for Automotive Network Fault Diagnosis"
 license = "AGPL-3.0-only"
 requires-python = ">=3.11"
@@ -25,5 +25,14 @@ dev = [
     "ruff>=0.6",
 ]
 
+# 源码已随插件迁入嵌套目录；显式告诉 Ruff 源码根目录，确保 `anda` 仍按
+# first-party 包分组，避免迁移后把现有测试中的导入错误识别为第三方依赖。
+[tool.ruff]
+src = ["plugins/automotive-network-debug-agent/src"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# 运行源码随 Codex Plugin 一起分发；根目录继续保留测试、文档和工程元数据。
+[tool.setuptools.packages.find]
+where = ["plugins/automotive-network-debug-agent/src"]

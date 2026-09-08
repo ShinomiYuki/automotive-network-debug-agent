@@ -1,6 +1,7 @@
 """验证 Codex 项目配置使用的 PowerShell 启动器可建立真实 stdio MCP 连接。"""
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -9,11 +10,17 @@ from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
 ROOT = Path(__file__).resolve().parents[2]
+PLUGIN_ROOT = ROOT / "plugins" / "automotive-network-debug-agent"
 
 
-def test_project_launcher_exposes_trace_tools(tmp_path):
+def test_plugin_launcher_exposes_trace_tools(tmp_path):
     async def exercise_launcher():
+        mcp_manifest = json.loads(
+            (PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8")
+        )
+        server = mcp_manifest["mcpServers"]["automotive-trace"]
         environment = os.environ.copy()
+        environment.pop("PYTHONPATH", None)
         environment.update(
             {
                 "ANDA_PYTHON": sys.executable,
@@ -22,15 +29,10 @@ def test_project_launcher_exposes_trace_tools(tmp_path):
             }
         )
         transport = StdioTransport(
-            command="pwsh",
-            args=[
-                "-NoLogo",
-                "-NoProfile",
-                "-File",
-                "scripts/run_trace_mcp.ps1",
-            ],
+            command=server["command"],
+            args=server["args"],
             env=environment,
-            cwd=str(ROOT),
+            cwd=str(PLUGIN_ROOT),
         )
         async with Client(transport) as client:
             tools = await client.list_tools()

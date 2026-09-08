@@ -22,6 +22,14 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
                 "search_database",
                 "decode_signal",
             }
+            for tool in tools:
+                # 所有 Trace Tool 均只读取本地证据；这些断言防止以后新增或重构
+                # 装饰器时意外丢失注解，导致非交互 Harness 再次要求审批。
+                assert tool.annotations is not None
+                assert tool.annotations.read_only_hint is True
+                assert tool.annotations.destructive_hint is False
+                assert tool.annotations.idempotent_hint is True
+                assert tool.annotations.open_world_hint is False
 
             first = await client.call_tool(
                 "load_trace",

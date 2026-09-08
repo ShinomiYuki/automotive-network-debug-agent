@@ -1,6 +1,6 @@
 # 一种多源数据驱动的汽车网络故障诊断智能体
 
-这是一个在 Codex 或兼容 Agent Harness 中运行的汽车网络日志调查 Agent。它接收自然语言问题，自主选择本地 Trace MCP Tool，分析 Vector BLF 及可选 DBC/ARXML，并回答“测试日志中实际发生了什么”。
+这是一个可安装到 Codex 的汽车网络日志调查插件。它把专业 Trace Skill 与本地 Trace MCP 打包在一起，接收自然语言问题后自主选择 Tool，分析 Vector BLF 及可选 DBC/ARXML，并回答“测试日志中实际发生了什么”。
 
 模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC 和 Trace MCP 均保留在本机。
 
@@ -24,16 +24,33 @@
 
 Trace Agent 不会仅凭 BLF 武断判断 PduR、CanIf、源 ECU 软件、硬件、线束或 CANoe 配置根因。需要工程配置或动态验证时，它只会说明证据边界并给出下一步建议。
 
-## 安装
+## 安装为 Codex Plugin
 
-要求 Python 3.11 或更高版本。建议使用已有 Conda 环境，依赖只需安装一次：
+要求 Python 3.11 或更高版本。建议复用已有 Conda 环境，不需要为插件另建环境。先在选定环境中安装一次运行依赖：
 
 ```powershell
 conda activate <你的环境名>
-python -m pip install -e ".[dev]"
+python -m pip install "git+https://github.com/ShinomiYuki/automotive-network-debug-agent.git@main"
 ```
 
-本项目不会在 Trace MCP 每次启动时展开一份独立依赖，也不会为日志自动生成大型磁盘数据库。Trace Session 使用进程内紧凑数组保存必要帧数据。
+把该环境的解释器绝对路径写入仅属于当前用户的本机配置。以下配置不在 Git 仓库中，也不会随插件发布：
+
+```powershell
+$configDir = Join-Path $env:LOCALAPPDATA "AutomotiveNetworkDebugAgent"
+New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+(Get-Command python).Source | Set-Content -LiteralPath (Join-Path $configDir "python-path.txt") -Encoding utf8
+```
+
+然后把 GitHub 仓库加入 Codex 插件市场并安装插件：
+
+```powershell
+codex plugin marketplace add ShinomiYuki/automotive-network-debug-agent --ref main
+codex plugin add automotive-network-debug-agent@shinomi-yuki
+```
+
+安装或更新后请新建一个 Codex 会话，让新的 Skill 与 MCP Tool 进入会话工具目录。在 ChatGPT 桌面应用中也可以从插件目录选择该市场并安装。
+
+本项目不会在 Trace MCP 每次启动时展开一份独立依赖，也不会为日志自动生成大型磁盘数据库。插件从自己的安装缓存读取 `anda` 源码，Trace Session 使用进程内紧凑数组保存必要帧数据。
 
 ## 准备输入
 
@@ -49,17 +66,18 @@ input/
 
 `.blf`、`.asc`、`.mf4` 等测量文件已被 Git 忽略，避免误提交真实项目日志。调用 Tool 时请传入文件的绝对路径。
 
-## 在 Codex / Harness 中运行
+## 在 Codex 中使用
 
-仓库已提供：
+插件包含：
 
-- `.agents/skills/trace-analysis/SKILL.md`：Codex 可自动发现的项目级专业 Agent 指令；
-- `.codex/config.toml`：项目级 `automotive-trace` MCP 注册；
-- `scripts/run_trace_mcp.ps1`：复用已有 Python/Conda 环境的本地启动器。
+- `skills/trace-analysis/SKILL.md`：专业调查指令与证据边界；
+- `.mcp.json`：随插件注册的 `automotive-trace` 本地 MCP；
+- `scripts/run_trace_mcp.ps1`：复用已有 Python/Conda 环境的启动器；
+- `src/anda/`：随插件分发的 Trace Core 与 MCP 实现。
 
-首次使用时，在已安装项目依赖的 Conda 环境中打开本项目即可。如果桌面 Harness 没有继承已激活环境，可在本机创建 `.codex/python-path.txt`，只写一行你自己的 `python.exe` 绝对路径。该文件已被 Git 忽略，不会泄露或绑定个人路径。也可临时设置 `ANDA_PYTHON` 环境变量。
+显式调用时，在 Codex CLI 中输入 `$trace-analysis`，或在 ChatGPT/Codex 插件界面用 `@` 选择 Trace Analysis。隐式触发时直接提供 BLF、可选 DBC 与问题描述；Skill 的描述和 `allow_implicit_invocation: true` 会允许 Harness 自动选择它。
 
-不要把个人代理、解释器绝对路径或其他机器配置写入 `.codex/config.toml`。项目本身不要求代理；确有网络需要时，应由用户在自己的运行环境中配置。
+解释器也可临时通过 `ANDA_PYTHON` 环境变量指定。不要把个人代理、解释器绝对路径或其他机器配置写入 `.mcp.json` 或插件清单。项目本身不要求代理；确有网络需要时，应由用户在自己的运行环境中配置。
 
 在 Codex 中用自然语言提供问题和绝对路径，例如：
 
@@ -69,17 +87,24 @@ DBC：D:\logs\vehicle.dbc
 问题：为什么 CAN2 上看不到 0x416？
 ~~~
 
-Codex 会按问题自动选择 `trace-analysis` Skill，并通过本地 Trace MCP 调查。
+问题也可以采用工程缺陷单常见的结构：`测试路由/测试网段`、`简要描述`、`前提条件`、`操作步骤`、`预期结果`、`实际结果`。Codex 会从中提取调查对象，但仍以实际 BLF/DBC Tool 结果作为证据。
 
 ## 单独启动 Trace MCP
 
-在仓库根目录运行：
+开发者在仓库根目录安装项目后运行：
 
 ```powershell
 python -m anda.mcp.trace.server
 ```
 
 默认使用 stdio transport，适合由 MCP Client 启动和连接。
+
+## 兼容性边界
+
+- Codex Plugin 的 `.codex-plugin/plugin.json`、插件市场与安装命令是 Codex/ChatGPT 的分发机制，其他 Harness 不能假定可一键安装同一插件。
+- `skills/trace-analysis/SKILL.md` 遵循 Agent Skills 目录形式；支持该规范的 Harness 可以复用专业指令。
+- `automotive-trace` 是标准 stdio MCP。任何支持本地 stdio MCP 的 Harness 都可以直接连接，但需要按该 Harness 的配置方式注册启动命令。
+- 插件不依赖 OpenAI API，也不创建、读取或要求 `OPENAI_API_KEY`。云端模型由使用者自己的 Harness 登录态提供，本地 MCP 只负责读取本机文件。
 
 ## MCP Tool
 
@@ -171,7 +196,12 @@ Trace Agent 的最终回答固定包含四部分：
 - ARXML 仅支持 cantools 能直接解析的文件，尚未增加厂商扩展兼容层。
 - 时序 Tool 只返回客观统计；没有可靠 expected period 时不会自动判断丢帧。
 - 当前只支持 BLF 日志输入，DBC 路径已完成端到端验证。
-- Harness 必须信任并重新加载项目配置后，才能发现新注册的项目 MCP。
+- 安装或升级插件后必须新建会话，旧会话不会动态获得新 Skill 或 MCP Tool。
+- Codex IDE 扩展当前不支持 Plugin；可在 Codex 桌面应用或 CLI 使用插件，或在 IDE 中单独安装 Skill 并手工注册 MCP。
+
+## Harness 验收用例
+
+`evals/trace_agent_cases.json` 是工程内长期保留的确定性验收规格，不是临时测试文件。它记录典型问题应选择的最短 Tool 路径、禁止的无意义调用和固定输出章节，供自动测试与人工真实会话验收共同使用。
 
 ## 开源许可证
 

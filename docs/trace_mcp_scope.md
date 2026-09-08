@@ -12,6 +12,7 @@
 - get_trace_summary
 - find_messages
 - get_message_timing
+- search_database
 - decode_signal
 
 ## 后续候选
