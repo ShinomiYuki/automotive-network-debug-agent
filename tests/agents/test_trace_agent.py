@@ -60,14 +60,15 @@ def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     mcp_manifest = json.loads(MCP_MANIFEST_PATH.read_text(encoding="utf-8"))
     marketplace = json.loads(MARKETPLACE_PATH.read_text(encoding="utf-8"))
-    server = mcp_manifest["mcpServers"]["automotive-trace"]
+    trace_server = mcp_manifest["mcpServers"]["automotive-trace"]
+    config_server = mcp_manifest["mcpServers"]["automotive-config"]
     project_text = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (
             ROOT / "pyproject.toml",
             PLUGIN_MANIFEST_PATH,
             MCP_MANIFEST_PATH,
-            PLUGIN_ROOT / "scripts" / "run_trace_mcp.ps1",
+            PLUGIN_ROOT / "scripts" / "run_mcp.ps1",
         )
     )
 
@@ -82,10 +83,16 @@ def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
     assert marketplace["plugins"][0]["source"]["path"] == (
         "./plugins/automotive-network-debug-agent"
     )
-    assert server["command"] == "pwsh"
-    assert server["args"][-1] == "./scripts/run_trace_mcp.ps1"
-    assert server["cwd"] == "."
-    assert server["default_tools_approval_mode"] == "writes"
+    assert set(mcp_manifest["mcpServers"]) == {
+        "automotive-trace",
+        "automotive-config",
+    }
+    for server in (trace_server, config_server):
+        assert server["command"] == "pwsh"
+        assert server["cwd"] == "."
+        assert server["default_tools_approval_mode"] == "writes"
+    assert trace_server["args"][-1] == "./scripts/run_trace_mcp.ps1"
+    assert config_server["args"][-1] == "./scripts/run_config_mcp.ps1"
     assert "openai_api_key" not in project_text.casefold()
     assert not (ROOT / ".codex" / "config.toml").exists()
 

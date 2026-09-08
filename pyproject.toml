@@ -1,9 +1,9 @@
 # 本文件负责定义 Python 项目的基础元数据与依赖。
-# 当前只保留 Trace MCP 一期需要的核心依赖；后续 CANoe 相关依赖应放入可选组。
+# Trace 与 Config MCP 共享同一 Python 包；Config Core 只使用标准库，不新增依赖。
 
 [project]
 name = "automotive-network-debug-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Multi-Source Data-Driven Agent for Automotive Network Fault Diagnosis"
 license = "AGPL-3.0-only"
 requires-python = ">=3.11"

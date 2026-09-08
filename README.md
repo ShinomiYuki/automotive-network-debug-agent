@@ -1,10 +1,12 @@
 # 一种多源数据驱动的汽车网络故障诊断智能体
 
-这是一个可安装到 Codex 的汽车网络日志调查插件。它把专业 Trace Skill 与本地 Trace MCP 打包在一起，接收自然语言问题后自主选择 Tool，分析 Vector BLF 及可选 DBC/ARXML，并回答“测试日志中实际发生了什么”。
+这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供专业 Trace Skill、本地 Trace MCP 和本地 Config MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”。
 
-模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC 和 Trace MCP 均保留在本机。
+模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC、ARXML、工程源码和两个 MCP 均保留在本机。
 
 ## 当前可用能力
+
+### Trace
 
 - 加载 BLF，并在服务进程内复用已解析的 Trace Session。
 - 查看日志时间范围、帧数、Channel、CAN ID、经典 CAN/CAN FD 等摘要。
@@ -13,6 +15,19 @@
 - 使用 DBC 或 cantools 可直接读取的 ARXML 解码指定信号。
 - 按 Message/Signal 名搜索有限数据库候选，为自然语言信号调查定位 CAN ID。
 - 自动限制帧与信号样本输出，避免大结果进入 MCP Client 上下文。
+
+### Config
+
+- 以工程源码和生成配置为主要输入，索引 C/H/C++ 完整标识符的定义、声明、引用和有限上下文。
+- 可从源码符号出发，按“同一完整标识符”关联 ARXML 配置对象；不凭相似名称猜测语义关系。
+- ARXML 是可选的确定性配置补充；工程目录与本次采用的 ARXML 文件/目录可以分别提供。
+- 查询 Message、CAN ID、PDU、Signal/Com、I-PDU Group 和配置对象。
+- 追踪 `Message/CAN ID → Source PDU → PduR Routing Path → Destination PDU`。
+- 查询 CanIf 方向、DLC、Classic CAN/CAN FD、Com 周期/模式/超时/替代值和 Signal Gateway。
+- 查询 I-PDU Group 成员及 BswM/ComM 对该组的直接启停引用；不模拟运行时状态。
+- 覆盖标准 AUTOSAR Frame/PDU Triggering，以及已验证的 DaVinci/MICROSAR ECUC CanIf/PduR/Com 结构。
+- 返回文件、行号、XML 对象路径、引用路径和有限源码上下文，供 Harness 审查。
+- 区分“路由不存在”和“路由存在但 Destination 缺失”，候选不唯一时要求补充条件。
 
 ## Trace Agent 能做什么
 
@@ -60,20 +75,27 @@ codex plugin add automotive-network-debug-agent@shinomi-yuki
 input/
 ├── blf/
 │   └── test.blf
-└── dbc/
-    └── vehicle.dbc
+├── dbc/
+│   └── vehicle.dbc
+├── config/
+│   └── selected-project.arxml
+└── project/
+    ├── generated/
+    └── source/
 ```
 
-`.blf`、`.asc`、`.mf4` 等测量文件已被 Git 忽略，避免误提交真实项目日志。调用 Tool 时请传入文件的绝对路径。
+`.blf`、`.asc`、`.mf4` 等测量文件已被 Git 忽略，避免误提交真实项目日志。调用 Tool 时请传入绝对路径。
+
+如果一个目录里同时存放多个项目或多个 ARXML 版本，请分别明确提供工程根目录和本次采用的 ARXML 路径。不要让 Harness 自行猜测项目或版本；信息不明确时，应先补充这两个输入。
 
 ## 在 Codex 中使用
 
 插件包含：
 
 - `skills/trace-analysis/SKILL.md`：专业调查指令与证据边界；
-- `.mcp.json`：随插件注册的 `automotive-trace` 本地 MCP；
-- `scripts/run_trace_mcp.ps1`：复用已有 Python/Conda 环境的启动器；
-- `src/anda/`：随插件分发的 Trace Core 与 MCP 实现。
+- `.mcp.json`：随插件注册的 `automotive-trace` 与 `automotive-config`；
+- `scripts/run_trace_mcp.ps1`、`run_config_mcp.ps1`：复用同一 Python/Conda 解释器选择逻辑的启动器；
+- `src/anda/`：随插件分发的 Trace Core、Config Core 与两个 MCP 实现。
 
 显式调用时，在 Codex CLI 中输入 `$trace-analysis`，或在 ChatGPT/Codex 插件界面用 `@` 选择 Trace Analysis。隐式触发时直接提供 BLF、可选 DBC 与问题描述；Skill 的描述和 `allow_implicit_invocation: true` 会允许 Harness 自动选择它。
 
@@ -89,6 +111,23 @@ DBC：D:\logs\vehicle.dbc
 
 问题也可以采用工程缺陷单常见的结构：`测试路由/测试网段`、`简要描述`、`前提条件`、`操作步骤`、`预期结果`、`实际结果`。Codex 会从中提取调查对象，但仍以实际 BLF/DBC Tool 结果作为证据。
 
+Config MCP 当前没有独立 Config Skill/Agent。安装插件并新建会话后，Harness 可以根据 Config Tool 描述直接调用它。工程源码是主要调查范围，ARXML 用于补充其确定性配置关系。建议明确提供：
+
+~~~text
+工程路径：D:\work\gateway-project
+ARXML：D:\inputs\selected-project.arxml
+问题：0x416 从 SU 到 IC 的路由是否配置，生成代码在哪里？
+~~~
+
+只调查源码时无需提供 ARXML，例如：
+
+~~~text
+工程路径：D:\work\gateway-project
+问题：PduRRoutingPath_416_SU 在哪里定义和引用？请只报告源码可证明的事实。
+~~~
+
+Harness 应先调用 `load_config_workspace`，把工程路径传给 `root_path`，把明确选择的 ARXML 传给 `arxml_paths`。只查源码时可省略 `arxml_paths`；需要 ARXML 关系但没有说明采用哪一份时，应先向用户询问，不能自行选择相邻项目或历史版本。工程路径本身未明确时也必须先询问。
+
 ## 单独启动 Trace MCP
 
 开发者在仓库根目录安装项目后运行：
@@ -99,24 +138,48 @@ python -m anda.mcp.trace.server
 
 默认使用 stdio transport，适合由 MCP Client 启动和连接。
 
+Config MCP 也可以独立启动：
+
+```powershell
+python -m anda.mcp.config.server
+```
+
+两个 Server 独立运行；Config MCP 不会直接调用 Trace MCP。
+
 ## 兼容性边界
 
 - Codex Plugin 的 `.codex-plugin/plugin.json`、插件市场与安装命令是 Codex/ChatGPT 的分发机制，其他 Harness 不能假定可一键安装同一插件。
 - `skills/trace-analysis/SKILL.md` 遵循 Agent Skills 目录形式；支持该规范的 Harness 可以复用专业指令。
-- `automotive-trace` 是标准 stdio MCP。任何支持本地 stdio MCP 的 Harness 都可以直接连接，但需要按该 Harness 的配置方式注册启动命令。
+- `automotive-trace` 与 `automotive-config` 都是标准 stdio MCP。任何支持本地 stdio MCP 的 Harness 都可以直接连接，但需要按该 Harness 的配置方式分别注册启动命令。
 - 插件不依赖 OpenAI API，也不创建、读取或要求 `OPENAI_API_KEY`。云端模型由使用者自己的 Harness 登录态提供，本地 MCP 只负责读取本机文件。
 
 ## MCP Tool
 
+### Trace Tool
 
 | Tool                 | 用途                                             |
-| ---------------------- | -------------------------------------------------- |
+| -------------------- | ------------------------------------------------ |
 | `load_trace`         | 加载 BLF 及可选数据库，返回`trace_id`            |
 | `get_trace_summary`  | 获取时间范围、帧数、Channel、CAN/CAN FD 摘要     |
 | `find_messages`      | 按 CAN ID、Channel、时间范围查询有限数量原始帧   |
 | `get_message_timing` | 获取帧数、周期、最大间隔与抖动统计               |
 | `search_database`    | 按 Message/Signal 名搜索至多 20 个数据库导航候选 |
 | `decode_signal`      | 解码指定 CAN ID 中的指定信号并返回有限样本       |
+
+### Config Tool
+
+| Tool | 用途 |
+| --- | --- |
+| `load_config_workspace` | 加载工程和明确选择的 ARXML，返回 `workspace_id` |
+| `search_config_symbol` | 查询 Message、CAN ID、PDU、配置对象或源码符号 |
+| `search_source_symbol` | 按完整名、前缀或子串搜索工程源码标识符 |
+| `inspect_source_symbol` | 以完整源码标识符为入口，查看角色、上下文和同名配置证据 |
+| `trace_message_route` | 追踪 Message/CAN ID、Source PDU、Routing Path 与 Destination |
+| `inspect_pdu` | 查看 PDU 定义、网段、Message 和路由关联 |
+| `inspect_communication` | 汇总 Message/PDU 的 CanIf、Com、时序、模式、超时和源码证据 |
+| `trace_signal_gateway` | 追踪 Com Signal、所在 I-PDU 和 ComGwMapping |
+| `inspect_ipdu_group` | 查看 I-PDU Group 成员与 BswM/ComM 直接控制引用 |
+| `find_source_context` | 定位 C/H/C++ 完整标识符并返回有限上下文 |
 
 ### 调用示例
 
@@ -156,6 +219,38 @@ python -m anda.mcp.trace.server
 
 `find_messages` 和 `decode_signal` 的单次返回上限均为 200 条；即使传入更大的 `limit`，服务也会按上限裁剪，并在结果中返回 `limit_applied`。
 
+分别提供工程与 ARXML：
+
+```json
+{
+  "root_path": "D:\\work\\gateway-project",
+  "arxml_paths": ["D:\\inputs\\selected-project.arxml"]
+}
+```
+
+把返回的 `workspace_id` 用于路由查询：
+
+```json
+{
+  "workspace_id": "<load_config_workspace 返回的 workspace_id>",
+  "arbitration_id": 1046,
+  "source_network": "SU",
+  "destination_network": "IC"
+}
+```
+
+也可以从源码标识符直接开始：
+
+```json
+{
+  "workspace_id": "<load_config_workspace 返回的 workspace_id>",
+  "symbol": "PduRRoutingPath_416_SU",
+  "context_lines": 2
+}
+```
+
+Config 搜索最多返回 50 个候选；源码上下文前后最多各 5 行，每行最多 240 个字符。源码工程可以独立加载；显式传入 `arxml_paths` 后，不会混入 `root_path` 下其他 ARXML。
+
 ## Agent 输出
 
 Trace Agent 的最终回答固定包含四部分：
@@ -193,9 +288,13 @@ Trace Agent 的最终回答固定包含四部分：
 
 - Trace Session 只在当前 MCP Server 进程内有效；服务重启后需要重新加载 BLF。
 - 当前采用紧凑内存存储，不写额外大型磁盘缓存；日志仍需有足够内存容纳必要字段和原始 payload。
-- ARXML 仅支持 cantools 能直接解析的文件，尚未增加厂商扩展兼容层。
+- Trace 信号解码使用 cantools 支持的 DBC/ARXML；Config 以源码完整标识符和有限上下文为主要入口，源码侧不解析宏展开、条件编译、跨语句数据流或完整 AST。
+- Config 的 ARXML 补充查询覆盖标准 Frame/PDU Triggering 和已验证的 DaVinci/MICROSAR ECUC CanIf/PduR/Com 结构，不是完整 AUTOSAR 通用解析器。
 - 时序 Tool 只返回客观统计；没有可靠 expected period 时不会自动判断丢帧。
 - 当前只支持 BLF 日志输入，DBC 路径已完成端到端验证。
+- Config Workspace 只在当前 Config MCP 进程内有效；文件变化后需要 `force_reload`，服务重启后需要重新加载。
+- 源码与 ARXML 只在完整标识符相同时自动关联；名称近似但无显式引用时不会建立语义关系。Config MCP 只返回配置/实现事实，不自动判断根因。
+- 当前没有 Config Skill/Config Agent；若工程路径或采用的 ARXML 不明确，必须先由用户补充。
 - 安装或升级插件后必须新建会话，旧会话不会动态获得新 Skill 或 MCP Tool。
 - Codex IDE 扩展当前不支持 Plugin；可在 Codex 桌面应用或 CLI 使用插件，或在 IDE 中单独安装 Skill 并手工注册 MCP。
 

@@ -26,3 +26,23 @@ class TraceNotFoundError(TraceError):
 
 class TraceDatabaseError(TraceError):
     """网络数据库加载或解码失败。"""
+
+
+class ConfigError(AndaError):
+    """工程配置查询相关异常。"""
+
+
+class ConfigInputError(ConfigError):
+    """Config Workspace 路径或查询参数无效。"""
+
+
+class ConfigNotFoundError(ConfigError):
+    """请求的 Workspace 或配置对象不存在。"""
+
+
+class ConfigParseError(ConfigError):
+    """ARXML 或源码输入无法可靠解析。"""
+
+
+class ConfigConflictError(ConfigError):
+    """查询命中多个配置对象，无法确定唯一调查入口。"""

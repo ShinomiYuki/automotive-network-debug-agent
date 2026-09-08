@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AUTOSAR xmlns="http://autosar.org/schema/r4.0">
+  <AR-PACKAGES>
+    <AR-PACKAGE>
+      <SHORT-NAME>Other</SHORT-NAME>
+      <ELEMENTS>
+        <I-SIGNAL-I-PDU>
+          <SHORT-NAME>IPdu_500_SU</SHORT-NAME>
+          <LENGTH>8</LENGTH>
+        </I-SIGNAL-I-PDU>
+        <I-SIGNAL-I-PDU>
+          <SHORT-NAME>IPdu_500_Other</SHORT-NAME>
+          <LENGTH>8</LENGTH>
+        </I-SIGNAL-I-PDU>
+        <ECUC-CONTAINER-VALUE>
+          <SHORT-NAME>PduRRoutingPath_500_Other</SHORT-NAME>
+          <DEFINITION-REF>/AUTOSAR/EcucDefs/PduR/PduRRoutingPath</DEFINITION-REF>
+          <SUB-CONTAINERS>
+            <ECUC-CONTAINER-VALUE>
+              <SHORT-NAME>PduRSrcPdu_500_Other</SHORT-NAME>
+              <DEFINITION-REF>/AUTOSAR/EcucDefs/PduR/PduRRoutingPath/PduRSrcPdu</DEFINITION-REF>
+              <REFERENCE-VALUES><ECUC-REFERENCE-VALUE><DEFINITION-REF>/AUTOSAR/EcucDefs/PduR/PduRRoutingPath/PduRSrcPdu/PduRSrcPduRef</DEFINITION-REF><VALUE-REF>/Other/IPdu_500_SU</VALUE-REF></ECUC-REFERENCE-VALUE></REFERENCE-VALUES>
+            </ECUC-CONTAINER-VALUE>
+            <ECUC-CONTAINER-VALUE>
+              <SHORT-NAME>PduRDestPdu_500_Other</SHORT-NAME>
+              <DEFINITION-REF>/AUTOSAR/EcucDefs/PduR/PduRRoutingPath/PduRDestPdu</DEFINITION-REF>
+              <REFERENCE-VALUES><ECUC-REFERENCE-VALUE><DEFINITION-REF>/AUTOSAR/EcucDefs/PduR/PduRRoutingPath/PduRDestPdu/PduRDestPduRef</DEFINITION-REF><VALUE-REF>/Other/IPdu_500_Other</VALUE-REF></ECUC-REFERENCE-VALUE></REFERENCE-VALUES>
+            </ECUC-CONTAINER-VALUE>
+          </SUB-CONTAINERS>
+        </ECUC-CONTAINER-VALUE>
+      </ELEMENTS>
+    </AR-PACKAGE>
+  </AR-PACKAGES>
+</AUTOSAR>

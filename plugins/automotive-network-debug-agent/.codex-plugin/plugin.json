@@ -1,7 +1,7 @@
 {
   "name": "automotive-network-debug-agent",
-  "version": "0.2.0+codex.20260908015803",
-  "description": "\u4f7f\u7528\u672c\u5730 BLF \u4e0e DBC \u8bc1\u636e\u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc\u6545\u969c\u73b0\u8c61\u3002",
+  "version": "0.3.0+codex.20260908062354",
+  "description": "\u4f7f\u7528\u672c\u5730 Trace \u4e0e\u5de5\u7a0b\u914d\u7f6e\u8bc1\u636e\u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc\u73b0\u8c61\u3002",
   "author": {
     "name": "ShinomiYuki",
     "url": "https://github.com/ShinomiYuki"
@@ -15,14 +15,19 @@
     "can-fd",
     "blf",
     "dbc",
+    "arxml",
+    "autosar",
+    "pdur",
+    "source-code",
+    "configuration",
     "mcp"
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Automotive Trace Agent",
-    "shortDescription": "\u4f7f\u7528\u672c\u5730 BLF \u4e0e DBC \u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc Trace \u73b0\u8c61",
-    "longDescription": "\u5728 Codex \u4e2d\u4f7f\u7528\u4e13\u4e1a Trace Skill \u81ea\u4e3b\u8c03\u7528\u672c\u5730 MCP\uff0c\u5206\u6790 BLF \u62a5\u6587\u3001Channel\u3001\u65f6\u5e8f\u548c DBC/ARXML \u4fe1\u53f7\u8bc1\u636e\uff0c\u4e0d\u8d8a\u754c\u63a8\u65ad ECU \u6216\u914d\u7f6e\u6839\u56e0\u3002",
+    "displayName": "Automotive Network Debug Agent",
+    "shortDescription": "\u4f7f\u7528\u672c\u5730 Trace \u4e0e\u5de5\u7a0b\u914d\u7f6e\u8bc1\u636e\u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc\u95ee\u9898",
+    "longDescription": "\u5728 Codex \u4e2d\u4f7f\u7528\u540c\u4e00\u63d2\u4ef6\u5185\u7684 Trace MCP \u4e0e Config MCP\uff0c\u5206\u522b\u67e5\u8be2 BLF/DBC \u5b9e\u9645\u73b0\u8c61\u548c\u5de5\u7a0b\u6e90\u7801\u3001\u751f\u6210\u914d\u7f6e\u53ca\u53ef\u9009 ARXML \u7684\u786e\u5b9a\u6027\u4e8b\u5b9e\uff1b\u5f53\u524d\u4e0d\u81ea\u52a8\u5224\u5b9a\u5b8c\u6574\u6839\u56e0\u3002",
     "developerName": "ShinomiYuki",
     "category": "Developer Tools",
     "capabilities": [
@@ -31,8 +36,9 @@
     "websiteURL": "https://github.com/ShinomiYuki/automotive-network-debug-agent",
     "defaultPrompt": [
       "\u5206\u6790\u6211\u63d0\u4f9b\u7684 BLF\u3001DBC \u548c\u95ee\u9898\u63cf\u8ff0\u3002",
-      "\u68c0\u67e5\u6307\u5b9a CAN ID \u5728\u5404 Channel \u7684\u51fa\u73b0\u60c5\u51b5\u3002",
-      "\u67e5\u770b\u6307\u5b9a\u62a5\u6587\u7684\u5468\u671f\u3001\u6700\u5927\u95f4\u9694\u6216\u4fe1\u53f7\u503c\u3002"
+      "\u4ece\u5de5\u7a0b\u6e90\u7801\u6807\u8bc6\u7b26\u5b9a\u4f4d\u5b9a\u4e49\u3001\u5f15\u7528\u53ca\u5bf9\u5e94\u914d\u7f6e\u8bc1\u636e\u3002",
+      "\u67e5\u8be2\u6307\u5b9a CAN ID \u7684 PDU\u3001Com \u5c5e\u6027\u4e0e\u8def\u7531\u5173\u7cfb\u3002",
+      "\u5b9a\u4f4d PduR Routing Path\u3001Signal Gateway \u53ca\u5176\u751f\u6210\u4ee3\u7801\u4f4d\u7f6e\u3002"
     ],
     "brandColor": "#2563EB"
   }
