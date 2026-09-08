@@ -1,0 +1,7 @@
+interface:
+  display_name: "Config Analysis"
+  short_description: "调查工程源码与可选 ARXML 中的汽车网络配置事实"
+  default_prompt: "使用 $config-analysis 调查我提供的工程源码、可选 ARXML 和配置问题。"
+
+policy:
+  allow_implicit_invocation: true

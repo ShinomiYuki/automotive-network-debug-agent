@@ -1,0 +1,83 @@
+{
+  "description": "Config Agent 的 Harness 原生调查用例；验证最短 Tool 计划、证据边界和固定输出，不模拟模型推理。",
+  "required_output_sections": [
+    "配置判断",
+    "关键证据",
+    "不确定项",
+    "下一步建议"
+  ],
+  "cases": [
+    {
+      "id": "route_exists",
+      "question": "工程路径和 ARXML 已提供。0x416 从 SU 到 IC 有没有配置路由？",
+      "expected_tool_plan": ["load_config_workspace", "trace_message_route"],
+      "expected_facts": ["route_found=true", "requested_destination_found=true"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "destination_missing",
+      "question": "工程路径和 ARXML 已提供。0x416 从 SU 到 BD 有没有配置 Destination？",
+      "expected_tool_plan": ["load_config_workspace", "trace_message_route"],
+      "expected_facts": ["route_found=true", "requested_destination_found=false"],
+      "plan_note": "必须与整个 Routing Path 不存在区分。",
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "route_absent",
+      "question": "工程路径和 ARXML 已提供。0x700 有没有 PduR 路由？",
+      "expected_tool_plan": ["load_config_workspace", "trace_message_route"],
+      "expected_facts": ["route_found=false"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "signal_gateway",
+      "question": "工程路径和 ARXML 已提供。VehicleSpeed 有没有配置 Signal Gateway？",
+      "expected_tool_plan": ["load_config_workspace", "trace_signal_gateway"],
+      "expected_facts": ["gateway_found=true", "mapping=VehicleSpeed_GW"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "communication_type",
+      "question": "工程路径和 ARXML 已提供。0x534 在 Network_BD 配置成 Classic CAN 还是 CAN FD？",
+      "expected_tool_plan": ["load_config_workspace", "inspect_communication"],
+      "expected_facts": ["is_fd=true", "length_bytes=16", "direction=receive"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "period_and_timeout",
+      "question": "工程路径和 ARXML 已提供。0x534 从 Network_BD 接收并转发到 Network_IC 时，发送周期和接收 timeout 配的是什么？",
+      "expected_tool_plan": ["load_config_workspace", "inspect_communication"],
+      "expected_facts": ["ComTxModeTimePeriod=0.02", "ComTimeout=0.5", "ComRxDataTimeoutAction=REPLACE"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "ipdu_group_controls",
+      "question": "工程路径和 ARXML 已提供。Pdu_534_Tx 属于哪个 I-PDU Group，有哪些直接启停控制关系？",
+      "expected_tool_plan": ["load_config_workspace", "inspect_communication", "inspect_ipdu_group"],
+      "expected_facts": ["group=TxGroup", "BswM action=START", "ComM direct reference"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "trace_signal_gateway", "find_source_context"]
+    },
+    {
+      "id": "source_symbol",
+      "question": "工程路径已提供。PduRRoutingPath_416_SU 在哪里定义和引用？",
+      "expected_tool_plan": ["load_config_workspace", "inspect_source_symbol"],
+      "expected_facts": ["exact_c_identifier", "file and line evidence"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "insufficient_runtime_evidence",
+      "question": "工程路径和 ARXML 已提供。TxGroup 切换通信状态后为什么还在发送？先看静态配置控制关系。",
+      "expected_tool_plan": ["load_config_workspace", "inspect_ipdu_group"],
+      "expected_facts": ["runtime_state_inferred=false", "uncertainty about runtime execution"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "find_source_context"]
+    },
+    {
+      "id": "ambiguous_message",
+      "question": "工程路径和 ARXML 已提供，但没有给网段。0x534 有没有配置路由？",
+      "expected_tool_plan": ["load_config_workspace", "trace_message_route"],
+      "expected_facts": ["multiple candidates", "request network or message"],
+      "plan_note": "候选冲突后停止并要求补充，不按排序选择第一个。",
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    }
+  ]
+}

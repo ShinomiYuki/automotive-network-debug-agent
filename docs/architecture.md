@@ -12,7 +12,7 @@
 Codex / 兼容 Agent Harness（提供模型推理）
                  │
                  ▼
-Trace Analysis Skill               Harness 直接选择 Tool
+Trace Analysis Skill              Config Analysis Skill
        │ 自主选择只读 Tool                     │
        ▼                                      ▼
 Automotive Trace MCP              Automotive Config MCP
@@ -28,8 +28,8 @@ Skill、两个 MCP 配置、PowerShell 启动器和 Python 源码；安装后从
 市场索引，不存放另一份 Skill。
 
 模型由用户当前的 Harness 登录态提供。本项目既不实现模型运行时，也不读取
-`OPENAI_API_KEY`；本地 MCP 只执行确定性的 Trace 或 Config 查询。当前尚未实现
-Config Skill/Agent，Config MCP 不自动调用 Trace MCP。
+`OPENAI_API_KEY`；两个专业 Skill 分别自主选择各自的只读 MCP Tool。Config Skill
+不调用 Trace MCP，Trace Skill 也不调用 Config MCP；跨源协调仍留给未来主 Debug Agent。
 
 Config 侧以用户明确给出的工程路径为主要范围。源码索引可以在没有 ARXML 时独立
 工作；用户需要 CAN ID、PduR、Com、Signal Gateway 或 I-PDU Group 等 AUTOSAR

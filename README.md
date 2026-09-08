@@ -1,6 +1,8 @@
-# 一种多源数据驱动的汽车网络故障诊断智能体
+# 一种多源工程数据驱动的汽车网络故障诊断智能体
 
-这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供专业 Trace Skill、本地 Trace MCP 和本地 Config MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”。
+**A Multi-Source Engineering Data-Driven Agent for Automotive Network Fault Diagnosis**
+
+这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供 Trace Analysis、Config Analysis 以及各自的本地 MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”。
 
 模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC、ARXML、工程源码和两个 MCP 均保留在本机。
 
@@ -38,6 +40,17 @@
 - 当前 Trace 证据足以支持什么现象，还有哪些无法确认。
 
 Trace Agent 不会仅凭 BLF 武断判断 PduR、CanIf、源 ECU 软件、硬件、线束或 CANoe 配置根因。需要工程配置或动态验证时，它只会说明证据边界并给出下一步建议。
+
+## Config Agent 能做什么
+
+- 根据自然语言配置问题，自主选择最少的 Config MCP Tool。
+- 调查 Message/CAN ID、PDU、PduR Route 和目标网段是否存在。
+- 查询 CanIf 的方向、DLC、Classic CAN/CAN FD，以及 Com 周期、Tx Mode、超时和替代值。
+- 调查 Signal Gateway、I-PDU Group、BswM/ComM 直接控制引用。
+- 定位工程源码或 Generated Config 中完整标识符的定义、引用和有限上下文。
+- 固定输出“配置判断、关键证据、不确定项、下一步建议”，并在候选不唯一时要求用户补充条件。
+
+Config Agent 只陈述工程源码和已加载配置能够证明的静态事实，不模拟运行时状态机，也不会把相关配置事实直接夸大为完整故障根因。
 
 ## 安装为 Codex Plugin
 
@@ -92,12 +105,13 @@ input/
 
 插件包含：
 
-- `skills/trace-analysis/SKILL.md`：专业调查指令与证据边界；
+- `skills/trace-analysis/SKILL.md`：Trace 调查指令与证据边界；
+- `skills/config-analysis/SKILL.md`：Config 调查、Tool 选择与静态证据边界；
 - `.mcp.json`：随插件注册的 `automotive-trace` 与 `automotive-config`；
 - `scripts/run_trace_mcp.ps1`、`run_config_mcp.ps1`：复用同一 Python/Conda 解释器选择逻辑的启动器；
 - `src/anda/`：随插件分发的 Trace Core、Config Core 与两个 MCP 实现。
 
-显式调用时，在 Codex CLI 中输入 `$trace-analysis`，或在 ChatGPT/Codex 插件界面用 `@` 选择 Trace Analysis。隐式触发时直接提供 BLF、可选 DBC 与问题描述；Skill 的描述和 `allow_implicit_invocation: true` 会允许 Harness 自动选择它。
+显式调用时，在 Codex CLI 中输入 `$trace-analysis` 或 `$config-analysis`，也可以在 ChatGPT/Codex 插件界面用 `@` 选择 Trace Analysis 或 Config Analysis。两个 Skill 都允许隐式触发，但描述分别限定为“BLF Trace 问题”和“已提供工程路径/配置文件的静态配置问题”，不会仅因用户提到“CAN”就启动 Config 调查。
 
 解释器也可临时通过 `ANDA_PYTHON` 环境变量指定。不要把个人代理、解释器绝对路径或其他机器配置写入 `.mcp.json` 或插件清单。项目本身不要求代理；确有网络需要时，应由用户在自己的运行环境中配置。
 
@@ -111,7 +125,7 @@ DBC：D:\logs\vehicle.dbc
 
 问题也可以采用工程缺陷单常见的结构：`测试路由/测试网段`、`简要描述`、`前提条件`、`操作步骤`、`预期结果`、`实际结果`。Codex 会从中提取调查对象，但仍以实际 BLF/DBC Tool 结果作为证据。
 
-Config MCP 当前没有独立 Config Skill/Agent。安装插件并新建会话后，Harness 可以根据 Config Tool 描述直接调用它。工程源码是主要调查范围，ARXML 用于补充其确定性配置关系。建议明确提供：
+使用 `$config-analysis` 时，工程源码是主要调查范围，ARXML 用于补充确定性配置关系。建议明确提供：
 
 ~~~text
 工程路径：D:\work\gateway-project
@@ -126,7 +140,7 @@ ARXML：D:\inputs\selected-project.arxml
 问题：PduRRoutingPath_416_SU 在哪里定义和引用？请只报告源码可证明的事实。
 ~~~
 
-Harness 应先调用 `load_config_workspace`，把工程路径传给 `root_path`，把明确选择的 ARXML 传给 `arxml_paths`。只查源码时可省略 `arxml_paths`；需要 ARXML 关系但没有说明采用哪一份时，应先向用户询问，不能自行选择相邻项目或历史版本。工程路径本身未明确时也必须先询问。
+Config Skill 会先调用一次 `load_config_workspace`，把工程路径传给 `root_path`，把明确选择的 ARXML 传给 `arxml_paths`，然后复用 `workspace_id` 并按问题选择最短查询路径。只查源码时可省略 `arxml_paths`；需要 ARXML 关系但没有说明采用哪一份时，Skill 会先询问，不会自行选择相邻项目或历史版本。工程路径本身未明确时也必须先补充。
 
 ## 单独启动 Trace MCP
 
@@ -149,7 +163,7 @@ python -m anda.mcp.config.server
 ## 兼容性边界
 
 - Codex Plugin 的 `.codex-plugin/plugin.json`、插件市场与安装命令是 Codex/ChatGPT 的分发机制，其他 Harness 不能假定可一键安装同一插件。
-- `skills/trace-analysis/SKILL.md` 遵循 Agent Skills 目录形式；支持该规范的 Harness 可以复用专业指令。
+- `skills/trace-analysis/SKILL.md` 和 `skills/config-analysis/SKILL.md` 遵循 Agent Skills 目录形式；支持该规范的 Harness 可以复用专业指令。
 - `automotive-trace` 与 `automotive-config` 都是标准 stdio MCP。任何支持本地 stdio MCP 的 Harness 都可以直接连接，但需要按该 Harness 的配置方式分别注册启动命令。
 - 插件不依赖 OpenAI API，也不创建、读取或要求 `OPENAI_API_KEY`。云端模型由使用者自己的 Harness 登录态提供，本地 MCP 只负责读取本机文件。
 
@@ -277,6 +291,13 @@ Trace Agent 的最终回答固定包含四部分：
 确认该报文是否要求从 CAN1 路由至 CAN2；若要求，再核对对应网关配置。
 ~~~
 
+Config Agent 使用对应的四部分结构：
+
+- **配置判断**：当前工程源码和已加载配置直接支持的事实结论。
+- **关键证据**：最少的文件、行号、完整标识符、PDU/Route、参数或 XML 路径。
+- **不确定项**：静态配置无法证明的运行时行为、未加载版本或多候选。
+- **下一步建议**：补充明确配置、检查具体控制条件，或交给 Trace 调查动态现象。
+
 ## Channel 与时间戳约定
 
 - 对外 Channel 统一为 Vector/CANoe 风格的 1-based 编号：`1` 表示 CAN1，`2` 表示 CAN2。
@@ -294,13 +315,13 @@ Trace Agent 的最终回答固定包含四部分：
 - 当前只支持 BLF 日志输入，DBC 路径已完成端到端验证。
 - Config Workspace 只在当前 Config MCP 进程内有效；文件变化后需要 `force_reload`，服务重启后需要重新加载。
 - 源码与 ARXML 只在完整标识符相同时自动关联；名称近似但无显式引用时不会建立语义关系。Config MCP 只返回配置/实现事实，不自动判断根因。
-- 当前没有 Config Skill/Config Agent；若工程路径或采用的 ARXML 不明确，必须先由用户补充。
+- Config Agent 不调用 Trace MCP；跨 Trace/Config 的联合调查和完整根因分析留给后续主 Debug Agent。
 - 安装或升级插件后必须新建会话，旧会话不会动态获得新 Skill 或 MCP Tool。
 - Codex IDE 扩展当前不支持 Plugin；可在 Codex 桌面应用或 CLI 使用插件，或在 IDE 中单独安装 Skill 并手工注册 MCP。
 
 ## Harness 验收用例
 
-`evals/trace_agent_cases.json` 是工程内长期保留的确定性验收规格，不是临时测试文件。它记录典型问题应选择的最短 Tool 路径、禁止的无意义调用和固定输出章节，供自动测试与人工真实会话验收共同使用。
+`evals/trace_agent_cases.json` 与 `evals/config_agent_cases.json` 是工程内长期保留的确定性验收规格，不是临时测试文件。它们记录典型问题应选择的最短 Tool 路径、禁止的无意义调用和固定输出章节，供自动测试与少量 Harness 人工验收共同使用。
 
 ## 开源许可证
 
