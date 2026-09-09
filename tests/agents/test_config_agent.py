@@ -48,6 +48,7 @@ def test_config_skill_is_packaged_and_has_discriminating_invocation_metadata():
     assert {path.name for path in (PLUGIN_ROOT / "skills").iterdir()} == {
         "trace-analysis",
         "config-analysis",
+        "debug-analysis",
     }
     assert not (ROOT / ".agents" / "skills" / "config-analysis").exists()
     assert not (ROOT / "skills" / "config-analysis").exists()

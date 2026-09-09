@@ -2,7 +2,7 @@
 
 **A Multi-Source Engineering Data-Driven Agent for Automotive Network Fault Diagnosis**
 
-这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供 Trace Analysis、Config Analysis 以及各自的本地 MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”。
+这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供 Trace Analysis、Config Analysis、Debug Analysis 和两个本地 MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”，Debug 负责按需联合两类证据。
 
 模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC、ARXML、工程源码和两个 MCP 均保留在本机。
 
@@ -31,6 +31,15 @@
 - 返回文件、行号、XML 对象路径、引用路径和有限源码上下文，供 Harness 审查。
 - 区分“路由不存在”和“路由存在但 Destination 缺失”，候选不唯一时要求补充条件。
 
+### Debug
+
+- 从自然语言问题或测试问题清单中提取 CAN ID、Message/Signal、网段、Channel、时间范围和本地输入路径。
+- 先判断 `Trace only`、`Config only`、`Trace → Config` 或 `Config → Trace`，不机械运行两个证据域。
+- 第一阶段已经回答问题或推翻问题前提时停止；只有结果能够被另一证据域继续缩小时才进入第二阶段。
+- 跨域只传递 CAN ID、规范名称、网段、Channel、时间范围和已确认现象等有限事实。
+- 比较 Trace 与 Config 是否一致，区分高可信候选、证据冲突、版本不一致和证据不足。
+- 固定输出“综合判断、关键证据、候选原因、不确定项、下一步建议”。
+
 ## Trace Agent 能做什么
 
 - 某 CAN ID 是否出现在指定 Channel 或时间范围内。
@@ -51,6 +60,14 @@ Trace Agent 不会仅凭 BLF 武断判断 PduR、CanIf、源 ECU 软件、硬件
 - 固定输出“配置判断、关键证据、不确定项、下一步建议”，并在候选不唯一时要求用户补充条件。
 
 Config Agent 只陈述工程源码和已加载配置能够证明的静态事实，不模拟运行时状态机，也不会把相关配置事实直接夸大为完整故障根因。
+
+## Debug Agent 能做什么
+
+- 对纯日志问题只调查 Trace，对纯静态配置问题只调查 Config。
+- 对“目标网段收不到”“信号值异常”等故障定位问题，先从最能缩小范围的一侧开始，再依据实际结果决定是否调查另一侧。
+- 当 Trace 与 Config 一致时形成有证据强度的候选原因；两者冲突时优先提示日志、DBC、源码和 ARXML 的版本一致性。
+- 当问题单描述与 BLF 不一致时，以日志证据指出当前样本未复现该陈述。
+- 在证据不足时保留不确定项，不编造 PduR、CanIf、Com、ECU、硬件或 CANoe 根因。
 
 ## 安装为 Codex Plugin
 
@@ -107,11 +124,12 @@ input/
 
 - `skills/trace-analysis/SKILL.md`：Trace 调查指令与证据边界；
 - `skills/config-analysis/SKILL.md`：Config 调查、Tool 选择与静态证据边界；
+- `skills/debug-analysis/SKILL.md`：动态调查规划、跨域有限信息传递与联合证据规则；
 - `.mcp.json`：随插件注册的 `automotive-trace` 与 `automotive-config`；
 - `scripts/run_trace_mcp.ps1`、`run_config_mcp.ps1`：复用同一 Python/Conda 解释器选择逻辑的启动器；
 - `src/anda/`：随插件分发的 Trace Core、Config Core 与两个 MCP 实现。
 
-显式调用时，在 Codex CLI 中输入 `$trace-analysis` 或 `$config-analysis`，也可以在 ChatGPT/Codex 插件界面用 `@` 选择 Trace Analysis 或 Config Analysis。两个 Skill 都允许隐式触发，但描述分别限定为“BLF Trace 问题”和“已提供工程路径/配置文件的静态配置问题”，不会仅因用户提到“CAN”就启动 Config 调查。
+显式调用时，在 Codex CLI 中输入 `$trace-analysis`、`$config-analysis` 或 `$debug-analysis`，也可以在 ChatGPT/Codex 插件界面用 `@` 选择对应 Skill。三个 Skill 都允许隐式触发，但职责描述互相区分：Trace 面向明确日志事实，Config 面向明确静态配置，Debug 只面向故障定位和跨来源综合问题，不会仅因用户提到“CAN”“PduR”或“BLF”就抢占专业 Skill。
 
 解释器也可临时通过 `ANDA_PYTHON` 环境变量指定。不要把个人代理、解释器绝对路径或其他机器配置写入 `.mcp.json` 或插件清单。项目本身不要求代理；确有网络需要时，应由用户在自己的运行环境中配置。
 
@@ -141,6 +159,18 @@ ARXML：D:\inputs\selected-project.arxml
 ~~~
 
 Config Skill 会先调用一次 `load_config_workspace`，把工程路径传给 `root_path`，把明确选择的 ARXML 传给 `arxml_paths`，然后复用 `workspace_id` 并按问题选择最短查询路径。只查源码时可省略 `arxml_paths`；需要 ARXML 关系但没有说明采用哪一份时，Skill 会先询问，不会自行选择相邻项目或历史版本。工程路径本身未明确时也必须先补充。
+
+联合调查使用 `$debug-analysis`，例如：
+
+~~~text
+BLF：D:\logs\issue.blf
+Channel 映射：SU=CAN1，IC=CAN2
+工程路径：D:\work\gateway-project
+ARXML：D:\inputs\selected-project.arxml
+问题：0x416 从 SU 路由到 IC 后，IC 一直收不到报文，请定位当前证据最支持的原因。
+~~~
+
+Debug Skill 会先用明确的网段到数字 Channel 映射在 BLF 中验证问题前提；若确认源网段存在而目标网段缺失，再把 `0x416`、`SU`、`IC` 和已确认现象传给 Config 调查路由。需要比较逻辑网段而映射未提供时会先询问，不从网段名猜 Channel。若 Trace 已推翻问题描述，或单个证据域已经回答问题，就不会机械调用另一 MCP。DBC 只在 Message/Signal 导航或信号解码确实需要时才要求。
 
 ## 单独启动 Trace MCP
 
@@ -298,6 +328,14 @@ Config Agent 使用对应的四部分结构：
 - **不确定项**：静态配置无法证明的运行时行为、未加载版本或多候选。
 - **下一步建议**：补充明确配置、检查具体控制条件，或交给 Trace 调查动态现象。
 
+Debug Agent 使用五部分结构：
+
+- **综合判断**：最重要的联合结论、候选可信度及两域是否一致。
+- **关键证据**：只展示实际调查过的 Trace/Config 证据域及最少支撑事实。
+- **候选原因**：最多三个有证据依据的候选，并标注高、中或低。
+- **不确定项**：缺失输入、运行时状态、多候选和版本一致性。
+- **下一步建议**：只给出能够显著减少当前不确定性的具体动作。
+
 ## Channel 与时间戳约定
 
 - 对外 Channel 统一为 Vector/CANoe 风格的 1-based 编号：`1` 表示 CAN1，`2` 表示 CAN2。
@@ -315,13 +353,15 @@ Config Agent 使用对应的四部分结构：
 - 当前只支持 BLF 日志输入，DBC 路径已完成端到端验证。
 - Config Workspace 只在当前 Config MCP 进程内有效；文件变化后需要 `force_reload`，服务重启后需要重新加载。
 - 源码与 ARXML 只在完整标识符相同时自动关联；名称近似但无显式引用时不会建立语义关系。Config MCP 只返回配置/实现事实，不自动判断根因。
-- Config Agent 不调用 Trace MCP；跨 Trace/Config 的联合调查和完整根因分析留给后续主 Debug Agent。
+- 当前 Debug Agent 按方案 A 由同一 Harness 会话直接调用两个 MCP，尚未使用独立 Subagent 上下文；Tool scope 主要依靠 Skill 规则、Tool Description 与 Eval 控制。
+- Custom Subagent 是未来 Codex 增强方向，当前 Plugin 没有 `.codex/agents/*.toml`、Python DebugAgent 或独立模型运行时。
+- 当前只完成合成 Fixture 下的软件闭环，尚未进行真实公司工程、BLF、DBC 和明确 ARXML 的完整端到端验收。
 - 安装或升级插件后必须新建会话，旧会话不会动态获得新 Skill 或 MCP Tool。
 - Codex IDE 扩展当前不支持 Plugin；可在 Codex 桌面应用或 CLI 使用插件，或在 IDE 中单独安装 Skill 并手工注册 MCP。
 
 ## Harness 验收用例
 
-`evals/trace_agent_cases.json` 与 `evals/config_agent_cases.json` 是工程内长期保留的确定性验收规格，不是临时测试文件。它们记录典型问题应选择的最短 Tool 路径、禁止的无意义调用和固定输出章节，供自动测试与少量 Harness 人工验收共同使用。
+`evals/trace_agent_cases.json`、`evals/config_agent_cases.json` 与 `evals/debug_agent_cases.json` 是工程内长期保留的确定性验收规格，不是临时测试文件。它们记录典型问题应选择的最短 Tool 路径、条件阶段、有限跨域信息、禁止的无意义调用和固定输出章节，供自动测试与少量 Harness 人工验收共同使用。
 
 ## 开源许可证
 
