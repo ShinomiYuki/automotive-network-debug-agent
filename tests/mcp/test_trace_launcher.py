@@ -16,6 +16,7 @@ PLUGIN_ROOT = ROOT / "plugins" / "automotive-network-debug-agent"
 EXPECTED_TOOLS = {
     "automotive-trace": {
         "load_trace",
+        "get_trace_load_status",
         "get_trace_summary",
         "find_messages",
         "get_message_timing",
@@ -24,6 +25,7 @@ EXPECTED_TOOLS = {
     },
     "automotive-config": {
         "load_config_workspace",
+        "get_config_load_status",
         "search_config_symbol",
         "search_source_symbol",
         "inspect_source_symbol",

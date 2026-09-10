@@ -32,8 +32,14 @@ def load_config_workspace(
     arxml_paths: list[str] | None = None,
     force_reload: bool = False,
 ) -> dict:
-    """加载工程及可选的明确 ARXML 路径；项目/版本不明确时应先询问用户。"""
-    return workspaces.load_config_workspace(root_path, arxml_paths, force_reload)
+    """启动工程及明确 ARXML 的后台索引，立即返回 workspace_id。"""
+    return workspaces.start_load_config_workspace(root_path, arxml_paths, force_reload)
+
+
+@mcp.tool(annotations=CONFIG_READ_ONLY_ANNOTATIONS)
+def get_config_load_status(workspace_id: str, wait_seconds: float = 0) -> dict:
+    """查询后台索引状态；可等待最多 55 秒，期间不得重复加载。"""
+    return workspaces.get_load_status(workspace_id, wait_seconds)
 
 
 @mcp.tool(annotations=CONFIG_READ_ONLY_ANNOTATIONS)

@@ -24,6 +24,10 @@ class TraceNotFoundError(TraceError):
     """请求的 Trace Session 不存在。"""
 
 
+class TraceNotReadyError(TraceError):
+    """Trace Session 已创建，但后台索引尚未完成。"""
+
+
 class TraceDatabaseError(TraceError):
     """网络数据库加载或解码失败。"""
 
@@ -38,6 +42,10 @@ class ConfigInputError(ConfigError):
 
 class ConfigNotFoundError(ConfigError):
     """请求的 Workspace 或配置对象不存在。"""
+
+
+class ConfigNotReadyError(ConfigError):
+    """Config Workspace 已创建，但后台索引尚未完成。"""
 
 
 class ConfigParseError(ConfigError):

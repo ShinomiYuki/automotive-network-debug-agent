@@ -8,6 +8,10 @@ from pathlib import Path
 
 import can
 import pytest
+from vblf.constants import ObjFlags, ObjType
+from vblf.general import ObjectHeader
+from vblf.lin import LinMessage
+from vblf.writer import BlfWriter
 
 
 @pytest.fixture()
@@ -82,3 +86,74 @@ BO_ 256 EngineData: 8 ECU
             writer(message)
 
     return blf_path, dbc_path
+
+
+@pytest.fixture()
+def lin_trace_files(tmp_path: Path) -> tuple[Path, Path]:
+    """生成包含 LIN 0x2A 的真实 BLF 对象和最小 LDF。"""
+    ldf_path = tmp_path / "test.ldf"
+    ldf_path.write_text(
+        """LIN_description_file;
+LIN_protocol_version = "2.1";
+LIN_language_version = "2.1";
+LIN_speed = 19.2 kbps;
+
+Nodes {
+  Master: Master, 5 ms, 0.1 ms;
+  Slaves: Slave;
+}
+
+Signals {
+  TimeoutStatus: 8, 0, Master, Slave;
+}
+
+Frames {
+  LinStatus: 42, Master, 8 {
+    TimeoutStatus, 0;
+  }
+}
+
+Node_attributes {
+  Slave {
+    LIN_protocol = "2.1";
+    configured_NAD = 0x01;
+    product_id = 0x0, 0x0, 0;
+    P2_min = 50 ms;
+    ST_min = 0 ms;
+    N_As_timeout = 1000 ms;
+    N_Cr_timeout = 1000 ms;
+    configurable_frames {
+      LinStatus;
+    }
+  }
+}
+""",
+        encoding="ascii",
+    )
+
+    header = ObjectHeader.new(
+        ObjectHeader.SIZE + LinMessage._FORMAT.size,
+        ObjType.LIN_MESSAGE,
+        ObjFlags.TIME_ONE_NANS,
+        0,
+        1_000_000,
+    )
+    message = LinMessage(
+        header=header,
+        channel=8,
+        id=0x2A,
+        dlc=8,
+        data=bytes.fromhex("7F 00 00 00 00 00 00 00"),
+        fsm_id=0,
+        fsm_state=0,
+        header_time=0,
+        full_time=0,
+        crc=0,
+        dir=0,
+        reserved=bytes(5),
+    )
+    blf_path = tmp_path / "lin.blf"
+    with BlfWriter(blf_path) as writer:
+        writer.write(message)
+
+    return blf_path, ldf_path

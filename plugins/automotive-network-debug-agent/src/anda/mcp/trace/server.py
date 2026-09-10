@@ -15,7 +15,7 @@ from anda.trace.session import TraceSessionManager
 sessions = TraceSessionManager()
 mcp = FastMCP("Automotive Trace MCP")
 
-# 这 6 个 Tool 只读取用户明确提供的本地 BLF/DBC/ARXML，并把解析结果保存在
+# 这组 Tool 只读取用户明确提供的本地 BLF/DBC/ARXML/LDF，并把解析结果保存在
 # 当前 MCP 进程的临时内存中；它们不会修改输入文件、调用外部系统或产生不可逆副作用。
 # 显式声明标准 MCP 注解后，Harness 可以在“仅写操作需审批”的策略下自动执行这些
 # 只读调查动作，同时仍然对未来可能新增的写 Tool 保持审批保护。
@@ -28,9 +28,23 @@ TRACE_READ_ONLY_ANNOTATIONS = ToolAnnotations(
 
 
 @mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
-def load_trace(blf_path: str, database_path: str | None = None) -> dict:
-    """加载 BLF 及可选 DBC/ARXML，返回可复用的 trace_id。"""
-    return sessions.load_trace(blf_path=blf_path, database_path=database_path)
+def load_trace(
+    blf_path: str,
+    database_path: str | None = None,
+    database_paths: list[str] | None = None,
+) -> dict:
+    """启动 BLF 与可选 DBC/ARXML/LDF 后台索引，立即返回 trace_id。"""
+    return sessions.start_load_trace(
+        blf_path=blf_path,
+        database_path=database_path,
+        database_paths=database_paths,
+    )
+
+
+@mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
+def get_trace_load_status(trace_id: str, wait_seconds: float = 0) -> dict:
+    """查询后台索引状态；可等待最多 55 秒，期间不得重复调用 load_trace。"""
+    return sessions.get_load_status(trace_id, wait_seconds)
 
 
 @mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
@@ -47,8 +61,9 @@ def find_messages(
     limit: int = 100,
     start_timestamp: float | None = None,
     end_timestamp: float | None = None,
+    bus_type: str | None = None,
 ) -> dict:
-    """按 CAN ID、1-based Channel 和可选绝对时间范围查询有限数量的帧。"""
+    """按 CAN/LIN、帧 ID、1-based Channel 和时间范围查询有限帧。"""
     return sessions.find_messages(
         trace_id=trace_id,
         arbitration_id=arbitration_id,
@@ -56,6 +71,7 @@ def find_messages(
         limit=limit,
         start_timestamp=start_timestamp,
         end_timestamp=end_timestamp,
+        bus_type=bus_type,
     )
 
 
@@ -66,14 +82,16 @@ def get_message_timing(
     channel: int | None = None,
     start_timestamp: float | None = None,
     end_timestamp: float | None = None,
+    bus_type: str | None = None,
 ) -> dict:
-    """返回指定报文的客观周期、间隔和抖动统计。"""
+    """返回指定 CAN/LIN 帧的客观周期、间隔和抖动统计。"""
     return sessions.get_message_timing(
         trace_id=trace_id,
         arbitration_id=arbitration_id,
         channel=channel,
         start_timestamp=start_timestamp,
         end_timestamp=end_timestamp,
+        bus_type=bus_type,
     )
 
 
@@ -92,8 +110,10 @@ def decode_signal(
     limit: int = 100,
     start_timestamp: float | None = None,
     end_timestamp: float | None = None,
+    bus_type: str | None = None,
+    database_file: str | None = None,
 ) -> dict:
-    """使用会话已加载的数据库解码指定信号，并限制返回样本数。"""
+    """使用已加载 DBC/ARXML/LDF 解码指定 CAN/LIN 信号并限制样本数。"""
     return sessions.decode_signal(
         trace_id=trace_id,
         arbitration_id=arbitration_id,
@@ -102,6 +122,8 @@ def decode_signal(
         limit=limit,
         start_timestamp=start_timestamp,
         end_timestamp=end_timestamp,
+        bus_type=bus_type,
+        database_file=database_file,
     )
 
 

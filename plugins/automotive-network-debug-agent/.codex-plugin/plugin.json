@@ -1,6 +1,6 @@
 {
   "name": "automotive-network-debug-agent",
-  "version": "0.5.0+codex.20260909062114",
+  "version": "0.6.0+codex.20260910031418",
   "description": "\u8054\u5408\u672c\u5730 Trace \u4e0e\u5de5\u7a0b\u914d\u7f6e\u8bc1\u636e\u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc\u6545\u969c\u3002",
   "author": {
     "name": "ShinomiYuki",
@@ -13,8 +13,10 @@
     "automotive",
     "can",
     "can-fd",
+    "lin",
     "blf",
     "dbc",
+    "ldf",
     "arxml",
     "autosar",
     "pdur",
@@ -27,7 +29,7 @@
   "interface": {
     "displayName": "Automotive Network Debug Agent",
     "shortDescription": "\u8054\u5408\u672c\u5730 Trace \u4e0e\u5de5\u7a0b\u914d\u7f6e\u8bc1\u636e\u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc\u6545\u969c",
-    "longDescription": "\u5728\u540c\u4e00 Codex \u63d2\u4ef6\u5185\u63d0\u4f9b Trace Analysis\u3001Config Analysis \u548c Debug Analysis \u4e09\u4e2a Harness-native Skill\uff0c\u6309\u9700\u8c03\u7528\u672c\u5730 Trace MCP \u4e0e Config MCP\uff0c\u8c03\u67e5 BLF/DBC \u5b9e\u9645\u73b0\u8c61\u4ee5\u53ca\u5de5\u7a0b\u6e90\u7801\u3001Generated Config \u548c\u53ef\u9009 ARXML \u4e2d\u7684\u786e\u5b9a\u6027\u4e8b\u5b9e\uff0c\u5e76\u5f62\u6210\u8de8\u57df\u8054\u5408\u8bc1\u636e\u3002",
+    "longDescription": "\u5728\u540c\u4e00 Codex \u63d2\u4ef6\u5185\u63d0\u4f9b Trace Analysis\u3001Config Analysis \u548c Debug Analysis \u4e09\u4e2a Harness-native Skill\uff0c\u6309\u9700\u8c03\u7528\u672c\u5730 Trace MCP \u4e0e Config MCP\uff0c\u8c03\u67e5 BLF/DBC/LDF \u4e2d CAN/CAN FD/LIN \u5b9e\u9645\u73b0\u8c61\u4ee5\u53ca\u5de5\u7a0b\u6e90\u7801\u3001Generated Config \u548c\u53ef\u9009 ARXML \u4e2d\u7684\u786e\u5b9a\u6027\u4e8b\u5b9e\uff0c\u5e76\u5f62\u6210\u8de8\u57df\u8054\u5408\u8bc1\u636e\u3002",
     "developerName": "ShinomiYuki",
     "category": "Developer Tools",
     "capabilities": [
@@ -35,7 +37,7 @@
     ],
     "websiteURL": "https://github.com/ShinomiYuki/automotive-network-debug-agent",
     "defaultPrompt": [
-      "\u4f7f\u7528 $trace-analysis \u5206\u6790\u6211\u63d0\u4f9b\u7684 BLF\u3001DBC \u548c\u95ee\u9898\u63cf\u8ff0\u3002",
+      "\u4f7f\u7528 $trace-analysis \u5206\u6790\u6211\u63d0\u4f9b\u7684 BLF\u3001DBC/ARXML/LDF \u548c\u95ee\u9898\u63cf\u8ff0\u3002",
       "\u4f7f\u7528 $config-analysis \u4ece\u5de5\u7a0b\u6e90\u7801\u6807\u8bc6\u7b26\u5b9a\u4f4d\u5b9a\u4e49\u3001\u5f15\u7528\u53ca\u5bf9\u5e94\u914d\u7f6e\u8bc1\u636e\u3002",
       "\u4f7f\u7528 $debug-analysis \u8054\u5408\u8c03\u67e5\u6211\u63d0\u4f9b\u7684\u6c7d\u8f66\u7f51\u7edc\u6545\u969c\u3001\u65e5\u5fd7\u548c\u5de5\u7a0b\u914d\u7f6e\u8bc1\u636e\u3002"
     ],

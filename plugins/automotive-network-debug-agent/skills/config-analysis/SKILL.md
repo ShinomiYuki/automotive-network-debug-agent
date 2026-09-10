@@ -12,7 +12,7 @@ description: 使用 Automotive Config MCP 调查用户明确提供的汽车工�
 - 从用户输入提取工程绝对路径、可选 ARXML 绝对路径、Message/CAN ID、源/目标网段、PDU、Signal、I-PDU Group 或源码标识符。路径可以位于任意本机位置，不要求绑定插件开发仓库。
 - 工程路径是必需调查范围；没有明确工程时先询问，不猜项目。ARXML 是可选补充：纯源码问题不强制要求；问题需要 AUTOSAR Route、CanIf 或 Com 关系但采用的 ARXML 不明确时，再请用户指定。
 - 多个工程或 ARXML 版本并存时不得自行选择。只把用户明确采用的 ARXML 传给 `arxml_paths`。
-- 每次调查先调用一次 `load_config_workspace`，后续复用同一 `workspace_id`。除非用户说明文件已变化，否则不重复加载，也不使用 `force_reload`。
+- 每次调查先调用一次 `load_config_workspace`。若返回 `index_ready=false`，使用同一 `workspace_id` 调用 `get_config_load_status`，并把 `wait_seconds` 设为最多 55；仍未完成时只重复状态查询，不重复加载同一输入。状态为 `failed` 时报告加载错误并停止。索引完成后复用同一 ID；除非用户说明文件已变化，否则不使用 `force_reload`。
 - Tool 返回多候选时，先使用用户已有的网段、Message、PDU 或完整路径缩小；仍不唯一就列入“不确定项”并请求必要条件，不选第一个。
 
 ## 选择最短 Tool 路径

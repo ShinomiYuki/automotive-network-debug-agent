@@ -3,15 +3,17 @@
 
 [project]
 name = "automotive-network-debug-agent"
-version = "0.5.0"
-description = "A Multi-Source Engineering Data-Driven Agent for Automotive Network Fault Diagnosis"
+version = "0.6.0"
+description = "A Multi-Source Data-Driven Agent for Automotive Network Fault Diagnosis"
 license = "AGPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
     "python-can>=4.4",
     "cantools>=39.4",
     "fastmcp>=2.0",
+    "ldfparser==0.26.0",
     "pydantic>=2.8",
+    "vblf==0.3.1",
 ]
 
 [project.optional-dependencies]

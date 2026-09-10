@@ -16,6 +16,7 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
             tools = await client.list_tools()
             assert {tool.name for tool in tools} == {
                 "load_trace",
+                "get_trace_load_status",
                 "get_trace_summary",
                 "find_messages",
                 "get_message_timing",
@@ -42,6 +43,11 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
             assert first.data["trace_id"] == second.data["trace_id"]
             assert second.data["reused"] is True
             trace_id = first.data["trace_id"]
+            status = await client.call_tool(
+                "get_trace_load_status",
+                {"trace_id": trace_id, "wait_seconds": 5},
+            )
+            assert status.data["status"] == "ready"
 
             summary = await client.call_tool(
                 "get_trace_summary", {"trace_id": trace_id}

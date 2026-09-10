@@ -19,6 +19,7 @@ FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "config"
 
 CONFIG_TOOLS = {
     "load_config_workspace",
+    "get_config_load_status",
     "search_config_symbol",
     "search_source_symbol",
     "inspect_source_symbol",
@@ -71,6 +72,7 @@ def test_config_skill_covers_tools_minimal_routing_and_evidence_boundaries():
     assert "不得模拟规则执行顺序" in content
     assert "不调用 `automotive-trace`" in content
     assert "不输出 Python traceback" in content
+    assert "不重复加载同一输入" in content
 
 
 def test_config_eval_cases_use_only_existing_tools_and_minimal_loads():
@@ -97,7 +99,9 @@ def test_config_eval_cases_use_only_existing_tools_and_minimal_loads():
         assert not (set(plan) & set(forbidden))
         assert plan[0] == "load_config_workspace"
         assert plan.count("load_config_workspace") == 1
-        assert len(plan) <= 3
+        assert plan[1] == "get_config_load_status"
+        assert plan.count("get_config_load_status") == 1
+        assert len(plan) <= 4
 
 
 def test_fixture_supports_config_agent_route_gateway_and_attribute_cases():

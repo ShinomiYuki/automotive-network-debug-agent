@@ -18,7 +18,7 @@ Codex / 兼容 Agent Harness（提供模型推理）
          ▼                ▼
 Automotive Trace MCP    Automotive Config MCP
          │                │
-    BLF + 可选 DBC    工程源码/Generated Config
+ BLF + DBC/ARXML/LDF  工程源码/Generated Config
                          + 可选 ARXML
 ```
 
@@ -38,6 +38,11 @@ Config、Debug 三个 Skill、两个 MCP 配置、PowerShell 启动器和 Python
 `OPENAI_API_KEY`。Trace 与 Config Skill 分别自主选择各自的只读 MCP Tool；Debug
 Skill 按问题动态选择 Trace、Config 或两者，并只在第一阶段结果需要进一步静态或
 动态证据时进入第二阶段。三个 Skill 均直接使用现有 MCP，不进行 Skill-to-Skill 调用。
+
+两个 MCP 的 Load Tool 都只负责规范化输入、去重后台任务并立即返回稳定 ID。大型 BLF
+或工程索引由进程内受限后台 worker 完成，Harness 通过状态 Tool 等待；同一输入在
+`queued/loading` 期间重复 Load 只返回原 ID，不会启动第二次扫描。索引数据仍只保存在
+MCP 进程内，不写大型磁盘缓存。
 
 Config 侧以用户明确给出的工程路径为主要范围。源码索引可以在没有 ARXML 时独立
 工作；用户需要 CAN ID、PduR、Com、Signal Gateway 或 I-PDU Group 等 AUTOSAR

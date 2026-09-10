@@ -17,6 +17,7 @@ EVAL_PATH = ROOT / "evals" / "trace_agent_cases.json"
 
 TOOLS = {
     "load_trace",
+    "get_trace_load_status",
     "get_trace_summary",
     "find_messages",
     "get_message_timing",
@@ -33,6 +34,7 @@ def test_trace_skill_is_plugin_discoverable_and_has_precise_frontmatter():
     assert content.startswith("---\nname: trace-analysis\n")
     assert "description:" in content.split("---", 2)[1]
     assert "BLF" in content.split("---", 2)[1]
+    assert "LDF" in content.split("---", 2)[1]
     assert "测试路由/测试网段" in content
     assert "简要描述、前提条件、操作步骤、预期结果、实际结果" in content
     assert "allow_implicit_invocation: true" in interface
@@ -53,6 +55,8 @@ def test_trace_skill_defines_minimal_routes_output_and_evidence_boundary():
     assert "`matched_signal_names` 返回的规范信号名" in content
     assert "不从 Trace 单一证据推断" in content
     assert "已回答用户问题后立即停止" in content
+    assert "不得重复 `load_trace`" in content
+    assert 'bus_type="lin"' in content
 
 
 def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
@@ -91,6 +95,7 @@ def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
         assert server["command"] == "pwsh"
         assert server["cwd"] == "."
         assert server["default_tools_approval_mode"] == "writes"
+        assert server["tool_timeout_sec"] == 120
     assert trace_server["args"][-1] == "./scripts/run_trace_mcp.ps1"
     assert config_server["args"][-1] == "./scripts/run_config_mcp.ps1"
     assert "openai_api_key" not in project_text.casefold()
@@ -106,12 +111,11 @@ def test_eval_cases_cover_expected_tools_and_fixed_output_contract():
         "message_missing_on_requested_channel",
         "message_timing",
         "signal_decode_with_database",
+        "lin_signal_decode_with_ldf",
         "signal_decode_without_database",
         "insufficient_root_cause_evidence",
     }
     for case in specification["cases"]:
         assert set(case["expected_tool_plan"]) <= TOOLS
         assert set(case["forbidden_tools"]) <= TOOLS
-        assert not (
-            set(case["expected_tool_plan"]) & set(case["forbidden_tools"])
-        )
+        assert not (set(case["expected_tool_plan"]) & set(case["forbidden_tools"]))

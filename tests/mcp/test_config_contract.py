@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "config"
 CONFIG_TOOLS = {
     "load_config_workspace",
+    "get_config_load_status",
     "search_config_symbol",
     "search_source_symbol",
     "inspect_source_symbol",
@@ -39,6 +40,11 @@ def test_config_mcp_contract_annotations_and_calls():
                 "load_config_workspace", {"root_path": str(FIXTURE_ROOT)}
             )
             workspace_id = loaded.data["workspace_id"]
+            status = await client.call_tool(
+                "get_config_load_status",
+                {"workspace_id": workspace_id, "wait_seconds": 5},
+            )
+            assert status.data["status"] == "ready"
             route = await client.call_tool(
                 "trace_message_route",
                 {"workspace_id": workspace_id, "arbitration_id": 0x416},
@@ -74,7 +80,7 @@ def test_config_mcp_contract_annotations_and_calls():
                 {"workspace_id": workspace_id, "group_name": "TxGroup"},
             )
 
-            assert loaded.data["index_ready"] is True
+            assert status.data["index_ready"] is True
             assert route.data["route_found"] is True
             assert len(route.data["routing_paths"][0]["destinations"]) == 2
             assert source.data["returned_count"] == 3

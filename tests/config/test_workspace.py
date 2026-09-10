@@ -1,13 +1,16 @@
 """验证 Config Workspace 的索引复用、配置搜索和路由链查询。"""
 
 from pathlib import Path
+from threading import Event
 
 import pytest
 
+import anda.config.workspace as workspace_module
 from anda.common.errors import (
     ConfigConflictError,
     ConfigInputError,
     ConfigNotFoundError,
+    ConfigNotReadyError,
     ConfigParseError,
 )
 from anda.config.workspace import ConfigWorkspaceManager
@@ -41,6 +44,54 @@ def test_workspace_load_reuses_snapshot_and_force_reload_replaces_it():
     assert reloaded["reused"] is False
     with pytest.raises(ConfigNotFoundError, match="未知 workspace_id"):
         manager.search_config_symbol(first["workspace_id"], "0x416")
+
+
+def test_background_load_returns_stable_id_and_deduplicates(monkeypatch):
+    manager = ConfigWorkspaceManager()
+    entered = Event()
+    release = Event()
+    original_scan = workspace_module._scan_supported_files
+
+    def delayed_scan(scope):
+        entered.set()
+        release.wait(5)
+        return original_scan(scope)
+
+    monkeypatch.setattr(workspace_module, "_scan_supported_files", delayed_scan)
+    first = manager.start_load_config_workspace(str(FIXTURE_ROOT))
+    assert entered.wait(1)
+    second = manager.start_load_config_workspace(str(FIXTURE_ROOT))
+    status = manager.get_load_status(first["workspace_id"])
+
+    assert first["index_ready"] is False
+    assert second["workspace_id"] == first["workspace_id"]
+    assert second["reused"] is True
+    assert status["status"] == "loading"
+    with pytest.raises(ConfigNotReadyError, match="get_config_load_status"):
+        manager.search_config_symbol(first["workspace_id"], "0x416")
+
+    release.set()
+    ready = manager.get_load_status(first["workspace_id"], wait_seconds=5)
+    assert ready["status"] == "ready"
+    assert ready["message_count"] == 6
+
+
+def test_background_load_surfaces_failure_and_allows_retry(tmp_path):
+    corrupt = tmp_path / "corrupt.arxml"
+    corrupt.write_text("<AUTOSAR>", encoding="ascii")
+    manager = ConfigWorkspaceManager()
+
+    first = manager.start_load_config_workspace(str(corrupt))
+    failed = manager.get_load_status(first["workspace_id"], wait_seconds=5)
+    retry = manager.start_load_config_workspace(str(corrupt))
+
+    assert failed["status"] == "failed"
+    assert "ConfigParseError" in failed["error"]
+    assert retry["workspace_id"] != first["workspace_id"]
+    assert retry["reused"] is False
+    assert manager.get_load_status(retry["workspace_id"], wait_seconds=5)["status"] == (
+        "failed"
+    )
 
 
 def test_workspace_can_load_one_explicit_arxml_without_neighbor_projects():

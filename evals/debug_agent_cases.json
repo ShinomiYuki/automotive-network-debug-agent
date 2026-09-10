@@ -25,32 +25,32 @@
       "route": "trace_only",
       "question": "BLF 已提供。0x100 在 CAN2 有没有出现？",
       "provided_inputs": ["blf"],
-      "expected_tool_plan": ["load_trace", "find_messages"],
+      "expected_tool_plan": ["load_trace", "get_trace_load_status", "find_messages"],
       "expected_stages": [
-        {"domain": "trace", "tools": ["load_trace", "find_messages"]}
+        {"domain": "trace", "tools": ["load_trace", "get_trace_load_status", "find_messages"]}
       ],
-      "forbidden_tools": ["load_config_workspace", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+      "forbidden_tools": ["load_config_workspace", "get_config_load_status", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
     },
     {
       "id": "config_only_route",
       "route": "config_only",
       "question": "工程和 ARXML 已提供。0x416 从 SU 到 IC 有没有配置？",
       "provided_inputs": ["project", "arxml"],
-      "expected_tool_plan": ["load_config_workspace", "trace_message_route"],
+      "expected_tool_plan": ["load_config_workspace", "get_config_load_status", "trace_message_route"],
       "expected_stages": [
-        {"domain": "config", "tools": ["load_config_workspace", "trace_message_route"]}
+        {"domain": "config", "tools": ["load_config_workspace", "get_config_load_status", "trace_message_route"]}
       ],
-      "forbidden_tools": ["load_trace", "get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal"]
+      "forbidden_tools": ["load_trace", "get_trace_load_status", "get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal"]
     },
     {
       "id": "trace_then_config_missing_destination",
       "route": "trace_then_config",
       "question": "0x416 从 SU 转发到 IC，SU=CAN1、IC=CAN2；IC 收不到，BLF、工程和 ARXML 都已提供。",
       "provided_inputs": ["blf", "project", "arxml", "channel_mapping"],
-      "expected_tool_plan": ["load_trace", "find_messages", "find_messages", "load_config_workspace", "trace_message_route"],
+      "expected_tool_plan": ["load_trace", "get_trace_load_status", "find_messages", "find_messages", "load_config_workspace", "get_config_load_status", "trace_message_route"],
       "expected_stages": [
-        {"domain": "trace", "tools": ["load_trace", "find_messages", "find_messages"], "expected_observation": "SU 有且 IC 无"},
-        {"domain": "config", "after_observation": "Trace 已确认 SU 有且 IC 无", "tools": ["load_config_workspace", "trace_message_route"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "observed_presence"]}
+        {"domain": "trace", "tools": ["load_trace", "get_trace_load_status", "find_messages", "find_messages"], "expected_observation": "SU 有且 IC 无"},
+        {"domain": "config", "after_observation": "Trace 已确认 SU 有且 IC 无", "tools": ["load_config_workspace", "get_config_load_status", "trace_message_route"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "observed_presence"]}
       ],
       "expected_behavior": ["第二阶段由 Trace 结果触发", "高强度候选必须由 Trace 与 Config 共同支持"],
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
@@ -60,22 +60,22 @@
       "route": "config_only",
       "question": "BLF、工程和 ARXML 都已提供；我只想确认 0x416 从 SU 到 IC 是否配置路由。",
       "provided_inputs": ["blf", "project", "arxml"],
-      "expected_tool_plan": ["load_config_workspace", "trace_message_route"],
+      "expected_tool_plan": ["load_config_workspace", "get_config_load_status", "trace_message_route"],
       "expected_stages": [
-        {"domain": "config", "tools": ["load_config_workspace", "trace_message_route"]}
+        {"domain": "config", "tools": ["load_config_workspace", "get_config_load_status", "trace_message_route"]}
       ],
       "expected_behavior": ["静态问题已回答后停止"],
-      "forbidden_tools": ["load_trace", "get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal"]
+      "forbidden_tools": ["load_trace", "get_trace_load_status", "get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal"]
     },
     {
       "id": "config_present_trace_abnormal",
       "route": "trace_then_config",
       "question": "0x416 在 SU 有、IC 无，SU=CAN1、IC=CAN2；请结合所给 BLF 和工程配置定位。",
       "provided_inputs": ["blf", "project", "arxml", "channel_mapping"],
-      "expected_tool_plan": ["load_trace", "find_messages", "find_messages", "load_config_workspace", "trace_message_route"],
+      "expected_tool_plan": ["load_trace", "get_trace_load_status", "find_messages", "find_messages", "load_config_workspace", "get_config_load_status", "trace_message_route"],
       "expected_stages": [
-        {"domain": "trace", "tools": ["load_trace", "find_messages", "find_messages"], "expected_observation": "SU 有且 IC 无"},
-        {"domain": "config", "after_observation": "Trace 异常成立", "tools": ["load_config_workspace", "trace_message_route"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "observed_presence"]}
+        {"domain": "trace", "tools": ["load_trace", "get_trace_load_status", "find_messages", "find_messages"], "expected_observation": "SU 有且 IC 无"},
+        {"domain": "config", "after_observation": "Trace 异常成立", "tools": ["load_config_workspace", "get_config_load_status", "trace_message_route"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "observed_presence"]}
       ],
       "expected_behavior": ["配置路由存在时不得认定源码 Bug", "指出实际行为与静态配置期望不一致"],
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
@@ -85,22 +85,22 @@
       "route": "trace_only",
       "question": "问题单说 IC（CAN2）没有 0x416；请先用所给 BLF 核实，工程也已提供。",
       "provided_inputs": ["blf", "project", "channel_mapping"],
-      "expected_tool_plan": ["load_trace", "find_messages"],
+      "expected_tool_plan": ["load_trace", "get_trace_load_status", "find_messages"],
       "expected_stages": [
-        {"domain": "trace", "tools": ["load_trace", "find_messages"], "expected_observation": "IC 实际存在 0x416"}
+        {"domain": "trace", "tools": ["load_trace", "get_trace_load_status", "find_messages"], "expected_observation": "IC 实际存在 0x416"}
       ],
       "expected_behavior": ["明确指出问题描述与当前日志证据不一致", "问题前提被推翻后停止"],
-      "forbidden_tools": ["load_config_workspace", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+      "forbidden_tools": ["load_config_workspace", "get_config_load_status", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
     },
     {
       "id": "trace_config_version_conflict",
       "route": "trace_then_config",
       "question": "当前 BLF 中 IC（CAN2）能收到 0x416，但所给工程配置看起来没有 IC Destination，请综合判断。",
       "provided_inputs": ["blf", "project", "arxml", "channel_mapping"],
-      "expected_tool_plan": ["load_trace", "find_messages", "load_config_workspace", "trace_message_route"],
+      "expected_tool_plan": ["load_trace", "get_trace_load_status", "find_messages", "load_config_workspace", "get_config_load_status", "trace_message_route"],
       "expected_stages": [
-        {"domain": "trace", "tools": ["load_trace", "find_messages"], "expected_observation": "IC 存在 0x416"},
-        {"domain": "config", "after_observation": "Trace 已确认目标端存在", "tools": ["load_config_workspace", "trace_message_route"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "observed_presence"]}
+        {"domain": "trace", "tools": ["load_trace", "get_trace_load_status", "find_messages"], "expected_observation": "IC 存在 0x416"},
+        {"domain": "config", "after_observation": "Trace 已确认目标端存在", "tools": ["load_config_workspace", "get_config_load_status", "trace_message_route"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "observed_presence"]}
       ],
       "expected_behavior": ["不强行解释冲突", "版本一致性列为高优先级不确定项"],
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
@@ -110,10 +110,10 @@
       "route": "trace_then_config",
       "question": "VehicleSpeed 在目标网段 IC（CAN2）值异常，BLF、DBC、工程和 ARXML 已提供。",
       "provided_inputs": ["blf", "dbc", "project", "arxml", "channel_mapping"],
-      "expected_tool_plan": ["load_trace", "search_database", "decode_signal", "load_config_workspace", "trace_signal_gateway"],
+      "expected_tool_plan": ["load_trace", "get_trace_load_status", "search_database", "decode_signal", "load_config_workspace", "get_config_load_status", "trace_signal_gateway"],
       "expected_stages": [
-        {"domain": "trace", "tools": ["load_trace", "search_database", "decode_signal"], "expected_observation": "目标信号异常得到日志证据"},
-        {"domain": "config", "after_observation": "Trace 信号异常成立且需要核对映射", "tools": ["load_config_workspace", "trace_signal_gateway"], "handoff_facts": ["arbitration_id", "message", "signal", "destination_network", "time_range"]}
+        {"domain": "trace", "tools": ["load_trace", "get_trace_load_status", "search_database", "decode_signal"], "expected_observation": "目标信号异常得到日志证据"},
+        {"domain": "config", "after_observation": "Trace 信号异常成立且需要核对映射", "tools": ["load_config_workspace", "get_config_load_status", "trace_signal_gateway"], "handoff_facts": ["arbitration_id", "message", "signal", "destination_network", "time_range"]}
       ],
       "expected_behavior": ["只在需要时核对 Signal Gateway", "不做无关 Message Route 查询"],
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "find_messages", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_ipdu_group", "find_source_context"]
@@ -123,10 +123,10 @@
       "route": "trace_then_config",
       "question": "0x700 没有转发，请用所给 BLF、工程和 ARXML 调查。",
       "provided_inputs": ["blf", "project", "arxml"],
-      "expected_tool_plan": ["load_trace", "find_messages", "load_config_workspace", "trace_message_route"],
+      "expected_tool_plan": ["load_trace", "get_trace_load_status", "find_messages", "load_config_workspace", "get_config_load_status", "trace_message_route"],
       "expected_stages": [
-        {"domain": "trace", "tools": ["load_trace", "find_messages"], "expected_observation": "当前范围未观察到 0x700"},
-        {"domain": "config", "after_observation": "Trace 只能证明当前范围未观察到", "tools": ["load_config_workspace", "trace_message_route"], "handoff_facts": ["arbitration_id", "time_range", "observed_presence"]}
+        {"domain": "trace", "tools": ["load_trace", "get_trace_load_status", "find_messages"], "expected_observation": "当前范围未观察到 0x700"},
+        {"domain": "config", "after_observation": "Trace 只能证明当前范围未观察到", "tools": ["load_config_workspace", "get_config_load_status", "trace_message_route"], "handoff_facts": ["arbitration_id", "time_range", "observed_presence"]}
       ],
       "expected_behavior": ["当前无法形成可靠候选原因", "不把零帧扩大为从未发送"],
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
@@ -139,17 +139,17 @@
       "expected_tool_plan": [],
       "expected_stages": [],
       "expected_behavior": ["询问 BLF 绝对路径、工程路径和 SU/IC 的数字 Channel 映射", "不机械要求 DBC", "仅在需要 AUTOSAR 关系时再询问明确 ARXML"],
-      "forbidden_tools": ["load_trace", "get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal", "load_config_workspace", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+      "forbidden_tools": ["load_trace", "get_trace_load_status", "get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal", "load_config_workspace", "get_config_load_status", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
     },
     {
       "id": "config_then_trace_when_route_exists",
       "route": "config_then_trace",
       "question": "我先怀疑 0x416 的 SU 到 IC 配置；SU=CAN1、IC=CAN2，如果路由存在，再用所给 BLF 核对实际收发。",
       "provided_inputs": ["project", "arxml", "blf", "channel_mapping"],
-      "expected_tool_plan": ["load_config_workspace", "trace_message_route", "load_trace", "find_messages", "find_messages"],
+      "expected_tool_plan": ["load_config_workspace", "get_config_load_status", "trace_message_route", "load_trace", "get_trace_load_status", "find_messages", "find_messages"],
       "expected_stages": [
-        {"domain": "config", "tools": ["load_config_workspace", "trace_message_route"], "expected_observation": "SU 到 IC 路由存在"},
-        {"domain": "trace", "after_observation": "Config 路由存在且未解释问题", "tools": ["load_trace", "find_messages", "find_messages"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "expected_communication"]}
+        {"domain": "config", "tools": ["load_config_workspace", "get_config_load_status", "trace_message_route"], "expected_observation": "SU 到 IC 路由存在"},
+        {"domain": "trace", "after_observation": "Config 路由存在且未解释问题", "tools": ["load_trace", "get_trace_load_status", "find_messages", "find_messages"], "handoff_facts": ["arbitration_id", "source_network", "destination_network", "expected_communication"]}
       ],
       "expected_behavior": ["第二阶段由 Config 结果触发", "只传递有限配置事实"],
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]

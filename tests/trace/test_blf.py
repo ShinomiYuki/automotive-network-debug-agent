@@ -36,6 +36,20 @@ def test_iter_blf_exposes_vector_one_based_channels(trace_files):
     assert channels == {1, 2}
 
 
+def test_iter_blf_reads_lin_frame(lin_trace_files):
+    blf_path, _ = lin_trace_files
+    frames = list(iter_blf(blf_path))
+
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.bus_type == "lin"
+    assert frame.channel == 8
+    assert frame.arbitration_id == 0x2A
+    assert frame.dlc == 8
+    assert frame.data == bytes.fromhex("7F 00 00 00 00 00 00 00")
+    assert frame.is_fd is False
+
+
 def test_iter_blf_rejects_missing_file(tmp_path):
     with pytest.raises(TraceInputError, match="BLF 文件不存在"):
         list(iter_blf(tmp_path / "missing.blf"))

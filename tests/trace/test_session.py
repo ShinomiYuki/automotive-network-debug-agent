@@ -1,8 +1,15 @@
 """验证 Trace Session 复用、查询、时序、解码和错误契约。"""
 
+from threading import Event
+
 import pytest
 
-from anda.common.errors import TraceDatabaseError, TraceInputError, TraceNotFoundError
+from anda.common.errors import (
+    TraceDatabaseError,
+    TraceInputError,
+    TraceNotFoundError,
+    TraceNotReadyError,
+)
 from anda.trace.session import MAX_FRAME_RESULTS, TraceSessionManager
 
 
@@ -18,6 +25,57 @@ def test_load_trace_reuses_unchanged_source(trace_files):
     assert second["reused"] is True
     assert first["frame_count"] == 225
     assert first["database_loaded"] is True
+
+
+def test_background_load_returns_stable_id_and_deduplicates(trace_files, monkeypatch):
+    blf_path, dbc_path = trace_files
+    manager = TraceSessionManager()
+    entered = Event()
+    release = Event()
+    original_build = TraceSessionManager._build_session
+
+    def delayed_build(*args, **kwargs):
+        entered.set()
+        release.wait(5)
+        return original_build(*args, **kwargs)
+
+    monkeypatch.setattr(
+        TraceSessionManager, "_build_session", staticmethod(delayed_build)
+    )
+    first = manager.start_load_trace(str(blf_path), str(dbc_path))
+    assert entered.wait(1)
+    second = manager.start_load_trace(str(blf_path), str(dbc_path))
+    status = manager.get_load_status(first["trace_id"])
+
+    assert first["index_ready"] is False
+    assert second["trace_id"] == first["trace_id"]
+    assert second["reused"] is True
+    assert status["status"] == "loading"
+    with pytest.raises(TraceNotReadyError, match="get_trace_load_status"):
+        manager.get_summary(first["trace_id"])
+
+    release.set()
+    ready = manager.get_load_status(first["trace_id"], wait_seconds=5)
+    assert ready["status"] == "ready"
+    assert ready["indexed_frame_count"] == 225
+
+
+def test_background_load_surfaces_failure_and_allows_retry(tmp_path):
+    corrupt = tmp_path / "corrupt.blf"
+    corrupt.write_bytes(b"not a BLF")
+    manager = TraceSessionManager()
+
+    first = manager.start_load_trace(str(corrupt))
+    failed = manager.get_load_status(first["trace_id"], wait_seconds=5)
+    retry = manager.start_load_trace(str(corrupt))
+
+    assert failed["status"] == "failed"
+    assert "BLF" in failed["error"]
+    assert retry["trace_id"] != first["trace_id"]
+    assert retry["reused"] is False
+    assert manager.get_load_status(retry["trace_id"], wait_seconds=5)["status"] == (
+        "failed"
+    )
 
 
 def test_summary_reports_time_channels_and_can_types(trace_files):
@@ -155,10 +213,12 @@ def test_decode_signal_rejects_unknown_signal_and_can_id(trace_files):
     manager = TraceSessionManager()
     trace_id = manager.load_trace(str(blf_path), str(dbc_path))["trace_id"]
 
-    with pytest.raises(TraceDatabaseError, match="不存在信号"):
+    with pytest.raises(TraceDatabaseError) as missing_signal:
         manager.decode_signal(trace_id, 0x100, "MissingSignal")
-    with pytest.raises(TraceDatabaseError, match="不存在 CAN ID"):
+    assert "MissingSignal" in str(missing_signal.value)
+    with pytest.raises(TraceDatabaseError) as missing_id:
         manager.decode_signal(trace_id, 0x999, "EngineSpeed")
+    assert "0x999" in str(missing_id.value)
 
 
 def test_search_database_resolves_signal_and_caps_results(trace_files):
@@ -175,12 +235,16 @@ def test_search_database_resolves_signal_and_caps_results(trace_files):
     assert exact["limit_applied"] == 20
     assert exact["matches"] == [
         {
+            "bus_type": "can",
             "arbitration_id": 0x100,
             "arbitration_id_hex": "0x100",
+            "frame_id": 0x100,
+            "frame_id_hex": "0x100",
             "message_name": "EngineData",
             "message_name_exact": False,
             "matched_signal_names": ["VehicleSpeed"],
             "signal_name_exact": True,
+            "database_file": "test.dbc",
         }
     ]
     assert case_variant["matches"][0]["matched_signal_names"] == ["VehicleSpeed"]
@@ -191,6 +255,41 @@ def test_search_database_resolves_signal_and_caps_results(trace_files):
         "VehicleSpeed",
     ]
     assert missing["matches"] == []
+
+
+def test_lin_ldf_query_timing_and_decode(lin_trace_files):
+    blf_path, ldf_path = lin_trace_files
+    manager = TraceSessionManager()
+    trace_id = manager.load_trace(str(blf_path), database_paths=[str(ldf_path)])[
+        "trace_id"
+    ]
+
+    summary = manager.get_summary(trace_id)
+    messages = manager.find_messages(
+        trace_id, arbitration_id=0x2A, channel=8, bus_type="LIN"
+    )
+    timing = manager.get_message_timing(
+        trace_id, arbitration_id=0x2A, channel=8, bus_type="lin"
+    )
+    database = manager.search_database(trace_id, "TimeoutStatus")
+    signal = manager.decode_signal(
+        trace_id,
+        arbitration_id=0x2A,
+        signal_name="TimeoutStatus",
+        channel=8,
+        bus_type="lin",
+    )
+
+    assert summary["lin_frame_count"] == 1
+    assert summary["bus_types"] == ["lin"]
+    assert messages["total_count"] == 1
+    assert messages["filters"]["bus_type"] == "lin"
+    assert messages["frames"][0]["frame_id"] == 0x2A
+    assert messages["frames"][0]["bus_type"] == "lin"
+    assert timing["frame_count"] == 1
+    assert database["matches"][0]["database_file"] == "test.ldf"
+    assert signal["sample_count"] == 1
+    assert signal["samples"][0]["value"] == 0x7F
 
 
 def test_search_database_rejects_missing_database_and_invalid_query(trace_files):

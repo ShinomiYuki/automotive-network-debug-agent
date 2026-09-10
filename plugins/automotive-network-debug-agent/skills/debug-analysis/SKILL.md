@@ -14,7 +14,7 @@ description: 使用 Automotive Trace 与 Automotive Config MCP 对用户明确�
 - 工程源码与 Generated Config 是主要静态证据；ARXML 只在用户明确选择后作为补充。多个工程或 ARXML 版本并存时不得自行选择。
 - 不要求用户一次提供全部输入。只询问当前最有价值的调查步骤所缺少的最少输入，不猜路径、网段、Channel 或版本。
 - Trace MCP 只接受数字 Channel，不能把 SU、IC 等逻辑网段名当作 Channel。需要比较网段现象时，必须使用用户明确给出的映射（例如 `SU=CAN1、IC=CAN2`）；映射缺失时先询问，或在问题允许时改走 `Config → Trace`，不得从名称或配置对象顺序猜测。
-- DBC 仅在需要从 Message/Signal 名导航或解码信号时才是必需输入。
+- DBC/ARXML 仅在需要从 CAN Message/Signal 名导航或解码时才是必需输入；LIN 信号导航与解码使用 LDF。
 
 ## 先选择调查路线
 
@@ -33,20 +33,20 @@ description: 使用 Automotive Trace 与 Automotive Config MCP 对用户明确�
 
 Trace 侧只记住用途，不展开专业 Skill 的全部规则：
 
-- 报文存在性或 Channel：`load_trace` → `find_messages`，普通样本查询使用 `limit=20`。指定 Channel 的首次查询返回零条匹配时，仅在需要确认其他 Channel 时，用相同 CAN ID 和时间范围再查一次不限 Channel。
-- 周期、最大间隔或抖动：`load_trace` → `get_message_timing`。
-- Signal：有 DBC/可读数据库时 `load_trace` → `search_database`；只有唯一精确候选才 `decode_signal`。缺少数据库时先请求，不猜 CAN ID。
+- 报文存在性或 Channel：`load_trace` → 必要时 `get_trace_load_status` → `find_messages`，普通样本查询使用 `limit=20`。指定 Channel 的首次查询返回零条匹配时，仅在需要确认其他 Channel 时，用相同帧 ID、`bus_type` 和时间范围再查一次不限 Channel。
+- 周期、最大间隔或抖动：`load_trace` → 必要时 `get_trace_load_status` → `get_message_timing`。
+- Signal：有 DBC/ARXML/LDF 时 `load_trace` → 必要时等待索引 → `search_database`；只有唯一精确候选才按返回的 Frame ID、`bus_type` 与 `database_file` 调用 `decode_signal`。缺少数据库时先请求，不猜帧 ID。
 - 整体日志范围或构成：仅在用户确实询问整体概览时调用 `get_trace_summary`。
 
 Config 侧按问题直达最相关 Tool：
 
-- Message/CAN ID 路由：`load_config_workspace` → `trace_message_route`。
-- CAN/CAN FD、DLC、方向、Com 周期/模式/超时：`load_config_workspace` → `inspect_communication`。
-- Signal Gateway：`load_config_workspace` → `trace_signal_gateway`；只有问题需要通信属性时才补 `inspect_communication`。
+- Message/CAN ID 路由：`load_config_workspace` → 必要时 `get_config_load_status` → `trace_message_route`。
+- CAN/CAN FD、DLC、方向、Com 周期/模式/超时：`load_config_workspace` → 必要时等待索引 → `inspect_communication`。
+- Signal Gateway：`load_config_workspace` → 必要时等待索引 → `trace_signal_gateway`；只有问题需要通信属性时才补 `inspect_communication`。
 - I-PDU Group：已知 Group 时直接 `inspect_ipdu_group`；只有 Message/PDU 时先用 `inspect_communication` 取得规范引用。
 - 完整源码标识符：`load_config_workspace` → `inspect_source_symbol`；名称不完整时才先搜索。
 
-一次调查中，同一 BLF/数据库最多调用一次 `load_trace`，后续复用 `trace_id`；同一工程和所选 ARXML 最多调用一次 `load_config_workspace`，后续复用 `workspace_id`。跨域后再次返回原域时也不得重复 Load。
+一次调查中，同一 BLF/数据库最多调用一次 `load_trace`，索引中只调用 `get_trace_load_status` 并复用 `trace_id`；同一工程和所选 ARXML 最多调用一次 `load_config_workspace`，索引中只调用 `get_config_load_status` 并复用 `workspace_id`。跨域后再次返回原域时也不得重复 Load。
 
 ## 跨域只传递有限事实
 

@@ -9,15 +9,17 @@ Workspace 是当前 MCP 进程内的只读快照。重复加载同一组路径�
 
 import os
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock, Semaphore, Thread
+from time import perf_counter
 from uuid import uuid4
 
 from anda.common.errors import (
     ConfigConflictError,
     ConfigInputError,
     ConfigNotFoundError,
+    ConfigNotReadyError,
 )
 from anda.config.arxml import normalize_identifier, parse_arxml_files, reference_name
 from anda.config.inspection import (
@@ -57,6 +59,22 @@ class ConfigWorkspace:
     source: SourceIndex
 
 
+@dataclass(slots=True)
+class ConfigLoadTask:
+    """一项快速返回 workspace_id 的后台索引任务。"""
+
+    workspace_id: str
+    root_key: str
+    root_path: str
+    arxml_paths: list[str] | None
+    force_reload: bool
+    status: str = "queued"
+    stage: str = "queued"
+    elapsed_seconds: float = 0.0
+    error: str | None = None
+    done: Event = field(default_factory=Event)
+
+
 class ConfigWorkspaceManager:
     """加载并查询 Config Workspace。"""
 
@@ -64,6 +82,120 @@ class ConfigWorkspaceManager:
         self._workspaces: dict[str, ConfigWorkspace] = {}
         self._root_to_id: dict[str, str] = {}
         self._load_lock = Lock()
+        self._load_slot = Semaphore(1)
+        self._task_lock = Lock()
+        self._load_tasks: dict[str, ConfigLoadTask] = {}
+        self._pending_keys: dict[str, str] = {}
+
+    def start_load_config_workspace(
+        self,
+        root_path: str,
+        arxml_paths: list[str] | None = None,
+        force_reload: bool = False,
+    ) -> dict:
+        """快速返回 workspace_id，并在 daemon 线程中扫描与解析工程。"""
+        scope = Path(root_path).expanduser().resolve()
+        if not (
+            scope.is_dir()
+            or (scope.is_file() and scope.suffix.casefold() in SUPPORTED_EXTENSIONS)
+        ):
+            raise ConfigInputError(f"工程路径不存在，或不是受支持的目录/文件：{scope}")
+        explicit_arxml_files = _resolve_explicit_arxml_paths(arxml_paths)
+        root_key = _workspace_cache_key(scope, explicit_arxml_files)
+
+        with self._task_lock:
+            pending_id = self._pending_keys.get(root_key)
+            if pending_id is not None:
+                return self._task_result(self._load_tasks[pending_id], reused=True)
+        with self._load_lock:
+            ready_id = self._root_to_id.get(root_key)
+            if ready_id is not None and not force_reload:
+                return self._load_result(
+                    ready_id, self._workspaces[ready_id], reused=True
+                )
+
+        workspace_id = str(uuid4())
+        task = ConfigLoadTask(
+            workspace_id,
+            root_key,
+            str(scope),
+            list(arxml_paths) if arxml_paths else None,
+            force_reload,
+        )
+        with self._task_lock:
+            existing_pending = self._pending_keys.get(root_key)
+            if existing_pending is not None:
+                return self._task_result(
+                    self._load_tasks[existing_pending], reused=True
+                )
+            self._load_tasks[workspace_id] = task
+            self._pending_keys[root_key] = workspace_id
+        Thread(
+            target=self._run_background_load,
+            args=(task,),
+            name=f"config-load-{workspace_id[:8]}",
+            daemon=True,
+        ).start()
+        return self._task_result(task, reused=False)
+
+    def get_load_status(self, workspace_id: str, wait_seconds: float = 0) -> dict:
+        if not 0 <= wait_seconds <= 55:
+            raise ConfigInputError("wait_seconds 必须在 0 到 55 之间")
+        with self._task_lock:
+            task = self._load_tasks.get(workspace_id)
+        if task is None:
+            with self._load_lock:
+                workspace = self._workspaces.get(workspace_id)
+            if workspace is None:
+                raise ConfigNotFoundError(f"未知 workspace_id：{workspace_id}")
+            return self._load_result(workspace_id, workspace, reused=True)
+        if wait_seconds:
+            task.done.wait(wait_seconds)
+        if task.status == "ready":
+            with self._load_lock:
+                workspace = self._workspaces[workspace_id]
+            return self._load_result(workspace_id, workspace, reused=True)
+        return self._task_result(task, reused=True)
+
+    def _run_background_load(self, task: ConfigLoadTask) -> None:
+        started = perf_counter()
+        task.status = "loading"
+        task.stage = "scanning_and_indexing_workspace"
+        try:
+            result = self.load_config_workspace(
+                task.root_path,
+                task.arxml_paths,
+                task.force_reload,
+            )
+            built_id = result["workspace_id"]
+            with self._load_lock:
+                workspace = self._workspaces[built_id]
+                self._workspaces[task.workspace_id] = workspace
+                self._root_to_id[task.root_key] = task.workspace_id
+            task.status = "ready"
+            task.stage = "ready"
+        # 后台边界必须捕获并序列化所有失败，否则调用方只会看到永久 loading。
+        except Exception as exc:  # noqa: BLE001
+            task.error = f"{type(exc).__name__}: {exc}"
+            task.status = "failed"
+            task.stage = "failed"
+        finally:
+            task.elapsed_seconds = perf_counter() - started
+            with self._task_lock:
+                self._pending_keys.pop(task.root_key, None)
+            task.done.set()
+
+    @staticmethod
+    def _task_result(task: ConfigLoadTask, reused: bool) -> dict:
+        return {
+            "workspace_id": task.workspace_id,
+            "status": task.status,
+            "index_ready": task.status == "ready",
+            "stage": task.stage,
+            "elapsed_seconds": round(task.elapsed_seconds, 3),
+            "reused": reused,
+            "error": task.error,
+        }
 
     def load_config_workspace(
         self,
@@ -90,6 +222,9 @@ class ConfigWorkspaceManager:
                     existing_id, self._workspaces[existing_id], reused=True
                 )
 
+        # 扫描数千源码文件和解析大型 ARXML 不能占用状态锁；否则另一个 load Tool
+        # 连“返回后台任务 ID”都会被当前索引阻塞。重型构建串行，状态查询保持可用。
+        with self._load_slot:
             files = initial_files or _scan_supported_files(scope)
             if arxml_paths:
                 # 显式指定 ARXML 时，以用户选择为准，不混入工程目录中可能属于其他
@@ -123,11 +258,18 @@ class ConfigWorkspaceManager:
                 arxml=arxml_index,
                 source=source_index,
             )
-            workspace_id = str(uuid4())
+
+        workspace_id = str(uuid4())
+        with self._load_lock:
+            current_id = self._root_to_id.get(root_key)
+            if current_id is not None and not force_reload:
+                return self._load_result(
+                    current_id, self._workspaces[current_id], reused=True
+                )
             self._workspaces[workspace_id] = workspace
             self._root_to_id[root_key] = workspace_id
-            if existing_id is not None:
-                self._workspaces.pop(existing_id, None)
+            if current_id is not None:
+                self._workspaces.pop(current_id, None)
             return self._load_result(workspace_id, workspace, reused=False)
 
     @staticmethod
@@ -146,6 +288,7 @@ class ConfigWorkspaceManager:
         )
         return {
             "workspace_id": workspace_id,
+            "status": "ready",
             "root_path": str(workspace.root),
             "reused": reused,
             "supported_file_count": len(workspace.files),
@@ -393,10 +536,18 @@ class ConfigWorkspaceManager:
         return result
 
     def _get(self, workspace_id: str) -> ConfigWorkspace:
-        try:
-            return self._workspaces[workspace_id]
-        except KeyError as error:
-            raise ConfigNotFoundError(f"未知 workspace_id：{workspace_id}") from error
+        workspace = self._workspaces.get(workspace_id)
+        if workspace is not None:
+            return workspace
+        task = self._load_tasks.get(workspace_id)
+        if task is not None:
+            if task.status == "failed":
+                raise ConfigInputError(f"Config 索引失败：{task.error}")
+            raise ConfigNotReadyError(
+                f"Config 索引尚未完成（{task.stage}）；请调用 "
+                "get_config_load_status 并复用同一 workspace_id，不要重复加载"
+            )
+        raise ConfigNotFoundError(f"未知 workspace_id：{workspace_id}")
 
 
 def _scan_supported_files(root: Path) -> list[Path]:

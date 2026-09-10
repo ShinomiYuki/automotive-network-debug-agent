@@ -21,6 +21,8 @@ _FLAG_FD = 1 << 1
 _FLAG_BRS = 1 << 2
 _FLAG_ESI = 1 << 3
 _FLAG_ERROR = 1 << 4
+_BUS_CAN = 0
+_BUS_LIN = 1
 
 
 class CompactFrameStore:
@@ -32,6 +34,7 @@ class CompactFrameStore:
         self.arbitration_ids = array("I")
         self.dlcs = array("B")
         self.directions = array("B")
+        self.bus_types = array("B")
         self.flags = array("B")
         self.payload_offsets = array("Q", [0])
         self.payload = bytearray()
@@ -42,6 +45,7 @@ class CompactFrameStore:
         self.classic_can_count = 0
         self.can_fd_count = 0
         self.error_frame_count = 0
+        self.lin_frame_count = 0
         self.start_timestamp: float | None = None
         self.end_timestamp: float | None = None
 
@@ -58,9 +62,14 @@ class CompactFrameStore:
         self.arbitration_ids.append(frame.arbitration_id)
         self.dlcs.append(min(frame.dlc, 0xFF))
         direction = (
-            0 if frame.is_rx is True else 1 if frame.is_rx is False else _UNKNOWN_DIRECTION
+            0
+            if frame.is_rx is True
+            else 1
+            if frame.is_rx is False
+            else _UNKNOWN_DIRECTION
         )
         self.directions.append(direction)
+        self.bus_types.append(_BUS_LIN if frame.bus_type == "lin" else _BUS_CAN)
 
         flags = 0
         if frame.is_extended_id:
@@ -82,7 +91,9 @@ class CompactFrameStore:
         if frame.channel is not None:
             self.channel_values.add(frame.channel)
         self.arbitration_id_values.add(frame.arbitration_id)
-        if frame.is_fd:
+        if frame.bus_type == "lin":
+            self.lin_frame_count += 1
+        elif frame.is_fd:
             self.can_fd_count += 1
         else:
             self.classic_can_count += 1
@@ -100,14 +111,17 @@ class CompactFrameStore:
         channel: int | None,
         start_timestamp: float | None = None,
         end_timestamp: float | None = None,
+        bus_type: str | None = None,
     ) -> Iterator[int]:
-        """按 ID、Channel 和绝对时间范围返回匹配帧序号。"""
+        """按总线、ID、Channel 和绝对时间范围返回匹配帧序号。"""
         positions = (
             self._id_index.get(arbitration_id, ())
             if arbitration_id is not None
             else range(len(self))
         )
         for position in positions:
+            if bus_type is not None and self.bus_type_at(position) != bus_type:
+                continue
             if channel is not None and self.channel_at(position) != channel:
                 continue
             timestamp = self.timestamps[position]
@@ -124,6 +138,9 @@ class CompactFrameStore:
     def timestamp_at(self, position: int) -> float:
         return self.timestamps[position]
 
+    def bus_type_at(self, position: int) -> str:
+        return "lin" if self.bus_types[position] == _BUS_LIN else "can"
+
     def payload_at(self, position: int) -> bytes:
         start = self.payload_offsets[position]
         end = self.payload_offsets[position + 1]
@@ -135,9 +152,13 @@ class CompactFrameStore:
         direction = self.directions[position]
         data = self.payload_at(position)
         arbitration_id = self.arbitration_ids[position]
+        bus_type = self.bus_type_at(position)
         return {
             "timestamp": self.timestamps[position],
             "channel": self.channel_at(position),
+            "bus_type": bus_type,
+            "frame_id": arbitration_id,
+            "frame_id_hex": f"0x{arbitration_id:X}",
             "arbitration_id": arbitration_id,
             "arbitration_id_hex": f"0x{arbitration_id:X}",
             "dlc": self.dlcs[position],
