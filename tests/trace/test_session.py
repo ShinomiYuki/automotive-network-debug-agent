@@ -1,5 +1,6 @@
 """验证 Trace Session 复用、查询、时序、解码和错误契约。"""
 
+from pathlib import Path
 from threading import Event
 
 import pytest
@@ -10,7 +11,70 @@ from anda.common.errors import (
     TraceNotFoundError,
     TraceNotReadyError,
 )
+from anda.trace.dbc import DatabaseMessage
+from anda.trace.models import RawFrame
+from anda.trace.routed_timeout import analyze_routed_signal_timeout
 from anda.trace.session import MAX_FRAME_RESULTS, TraceSessionManager
+from anda.trace.store import CompactFrameStore
+
+
+class _ByteDecoder:
+    def decode(self, data: bytes) -> dict:
+        return {"TimeoutStatus": data[0]}
+
+
+class _PerChannelDatabase:
+    def __init__(self, messages: dict[str, DatabaseMessage]) -> None:
+        self.messages = messages
+
+    def resolve_message(
+        self,
+        selector: str,
+        *,
+        bus_type: str | None = None,
+        database_file: str | None = None,
+    ) -> DatabaseMessage:
+        assert selector == "LinStatus"
+        assert bus_type == "lin"
+        assert database_file is not None
+        return self.messages[database_file]
+
+    def resolve_signal(
+        self,
+        arbitration_id: int,
+        signal_name: str,
+        bus_type: str | None = None,
+        database_file: str | None = None,
+    ) -> DatabaseMessage:
+        assert signal_name == "TimeoutStatus"
+        assert bus_type == "lin"
+        assert database_file is not None
+        message = self.messages[database_file]
+        assert message.frame_id == arbitration_id
+        return message
+
+
+def _append_frame(
+    store: CompactFrameStore,
+    timestamp: float,
+    channel: int,
+    frame_id: int,
+    value: int,
+    bus_type: str,
+) -> None:
+    store.append(
+        RawFrame(
+            timestamp=timestamp,
+            channel=channel,
+            arbitration_id=frame_id,
+            dlc=8,
+            data=bytes([value]) + bytes(7),
+            is_extended_id=False,
+            is_fd=False,
+            is_rx=True,
+            bus_type=bus_type,
+        )
+    )
 
 
 def test_load_trace_reuses_unchanged_source(trace_files):
@@ -91,6 +155,8 @@ def test_summary_reports_time_channels_and_can_types(trace_files):
     assert summary["classic_can_frame_count"] == 224
     assert summary["can_fd_frame_count"] == 1
     assert summary["duration_seconds"] == pytest.approx(2.19)
+    assert summary["timestamp_reference"]["capture_point"] == "UNKNOWN"
+    assert summary["timestamp_reference"]["ecu_internal_send_time"] == "UNKNOWN"
 
 
 def test_unknown_trace_id_is_clear_error():
@@ -303,3 +369,128 @@ def test_search_database_rejects_missing_database_and_invalid_query(trace_files)
         manager.search_database(trace_id, " ")
     with pytest.raises(TraceInputError, match="limit"):
         manager.search_database(trace_id, "VehicleSpeed", limit=0)
+
+
+def test_routed_timeout_requires_explicit_channel_mapping(routed_timeout_files):
+    blf_path, ldf_path = routed_timeout_files
+    manager = TraceSessionManager()
+    trace_id = manager.load_trace(str(blf_path), str(ldf_path))["trace_id"]
+
+    with pytest.raises(TraceInputError, match="set_channel_mapping"):
+        manager.analyze_routed_signal_timeout(
+            trace_id,
+            source_channel=1,
+            source_message="0x207",
+            target_channels=[8, 9],
+            target_frame="0x2A",
+            signal_name="TimeoutStatus",
+            timeout_value=0,
+            configured_timeout_ms=500,
+        )
+
+
+def test_routed_timeout_pairs_events_and_reports_per_channel_statistics(
+    routed_timeout_files,
+):
+    blf_path, ldf_path = routed_timeout_files
+    manager = TraceSessionManager()
+    trace_id = manager.load_trace(str(blf_path), str(ldf_path))["trace_id"]
+    mapping = manager.set_channel_mapping(
+        trace_id,
+        [
+            {
+                "analysis_channel": 1,
+                "bus_type": "can",
+                "logical_network": "FL_CANFD_IC",
+                "mapping_source": "user",
+            },
+            {
+                "analysis_channel": 8,
+                "bus_type": "lin",
+                "logical_network": "FL_LIN_TDL1",
+                "ecu_channel": "LIN02",
+                "mapping_source": "test report",
+            },
+            {
+                "analysis_channel": 9,
+                "bus_type": "lin",
+                "logical_network": "FL_LIN_TDL2",
+                "ecu_channel": "LIN06",
+                "mapping_source": "test report",
+            },
+        ],
+    )
+    result = manager.analyze_routed_signal_timeout(
+        trace_id,
+        source_channel=1,
+        source_message="0x207",
+        target_channels=[8, 9],
+        target_frame="0x2A",
+        signal_name="TimeoutStatus",
+        timeout_value=0,
+        configured_timeout_ms=500,
+    )
+
+    assert mapping["mapping_inferred"] is False
+    assert result["detected_source_stop_event_count"] == 1
+    event = result["events"][0]
+    targets = {item["analysis_channel"]: item for item in event["targets"]}
+    assert targets[8]["missed_bus_frame_count"] == 1
+    assert targets[9]["missed_bus_frame_count"] == 2
+    assert targets[8]["first_target_old_after_source_stop"]["timestamp"] < (
+        event["deadline_timestamp"]
+    )
+    assert targets[8]["source_to_timeout_ms"] == pytest.approx(520.0)
+    assert targets[9]["source_to_timeout_ms"] == pytest.approx(540.0)
+    assert targets[9]["exceeds_expected_max"] is True
+    statistics = {
+        item["analysis_channel"]: item for item in result["per_channel_statistics"]
+    }
+    assert statistics[8]["source_to_timeout_ms"]["p95"] == pytest.approx(520.0)
+    assert statistics[9]["source_to_timeout_ms"]["max"] == pytest.approx(540.0)
+    assert result["abnormal_event_count"] == 1
+    assert result["root_cause_inferred"] is False
+    assert result["timestamp_reference"]["capture_point"] == "UNKNOWN"
+
+
+def test_routed_timeout_supports_per_channel_ids_and_direct_transition(tmp_path: Path):
+    store = CompactFrameStore()
+    for timestamp in (0.0, 0.1, 1.0):
+        _append_frame(store, timestamp, 1, 0x207, 0x3F, "can")
+    _append_frame(store, 0.09, 8, 0x2A, 0x3F, "lin")
+    _append_frame(store, 0.61, 8, 0x2A, 0x00, "lin")
+    _append_frame(store, 0.09, 9, 0x2B, 0x3F, "lin")
+    _append_frame(store, 0.62, 9, 0x2B, 0x00, "lin")
+    messages = {
+        name: DatabaseMessage(
+            path=tmp_path / name,
+            bus_type="lin",
+            frame_id=frame_id,
+            name="LinStatus",
+            signal_names=("TimeoutStatus",),
+            decoder=_ByteDecoder(),
+        )
+        for name, frame_id in (("lin8.ldf", 0x2A), ("lin9.ldf", 0x2B))
+    }
+
+    result = analyze_routed_signal_timeout(
+        store=store,
+        database=_PerChannelDatabase(messages),
+        source_channel=1,
+        source_message="0x207",
+        target_channels=[8, 9],
+        target_frame="LinStatus",
+        signal_name="TimeoutStatus",
+        timeout_value=0,
+        configured_timeout_ms=500,
+        target_database_files={"8": "lin8.ldf", "9": "lin9.ldf"},
+    )
+
+    targets = {
+        item["analysis_channel"]: item for item in result["events"][0]["targets"]
+    }
+    assert result["target"]["frame_ids_by_channel"] == {"8": 0x2A, "9": 0x2B}
+    assert targets[8]["first_target_old_after_source_stop"] is None
+    assert targets[8]["last_target_old_before_timeout"]["timestamp"] == 0.09
+    assert targets[8]["source_to_timeout_ms"] == pytest.approx(510.0)
+    assert targets[9]["source_to_timeout_ms"] == pytest.approx(520.0)

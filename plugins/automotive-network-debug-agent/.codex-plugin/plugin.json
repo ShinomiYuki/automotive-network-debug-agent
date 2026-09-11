@@ -1,6 +1,6 @@
 {
   "name": "automotive-network-debug-agent",
-  "version": "0.6.0+codex.20260910031418",
+  "version": "0.7.0+codex.20260911072103",
   "description": "\u8054\u5408\u672c\u5730 Trace \u4e0e\u5de5\u7a0b\u914d\u7f6e\u8bc1\u636e\u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc\u6545\u969c\u3002",
   "author": {
     "name": "ShinomiYuki",
@@ -33,7 +33,8 @@
     "developerName": "ShinomiYuki",
     "category": "Developer Tools",
     "capabilities": [
-      "Read"
+      "Read",
+      "Write"
     ],
     "websiteURL": "https://github.com/ShinomiYuki/automotive-network-debug-agent",
     "defaultPrompt": [

@@ -54,3 +54,7 @@ class ConfigParseError(ConfigError):
 
 class ConfigConflictError(ConfigError):
     """查询命中多个配置对象，无法确定唯一调查入口。"""
+
+
+class InvestigationError(AndaError):
+    """结构化调查证据包路径、内容或写入操作无效。"""

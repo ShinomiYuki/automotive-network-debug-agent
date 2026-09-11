@@ -40,9 +40,10 @@ Skill 按问题动态选择 Trace、Config 或两者，并只在第一阶段结�
 动态证据时进入第二阶段。三个 Skill 均直接使用现有 MCP，不进行 Skill-to-Skill 调用。
 
 两个 MCP 的 Load Tool 都只负责规范化输入、去重后台任务并立即返回稳定 ID。大型 BLF
-或工程索引由进程内受限后台 worker 完成，Harness 通过状态 Tool 等待；同一输入在
-`queued/loading` 期间重复 Load 只返回原 ID，不会启动第二次扫描。索引数据仍只保存在
-MCP 进程内，不写大型磁盘缓存。
+或工程索引由受限后台 worker 完成，Harness 通过状态 Tool 读取阶段、计数、进度和耗时；
+同一输入在 `queued/loading` 期间重复 Load 只返回原 ID，不会启动第二次扫描。BLF 帧及
+DBC/LDF 定义在 Trace MCP 进程内复用；Config 的源码文件清单、标识符出现位置和行 byte
+offset 使用用户缓存目录中的 SQLite 持久化，并按绝对路径、大小、mtime 增量失效。共享基础索引负责增量构建，每个 Config Workspace 查询固定的不可变 generation，使其源码证据与当次内存 ARXML 保持同一加载代。
 
 Config 侧以用户明确给出的工程路径为主要范围。源码索引可以在没有 ARXML 时独立
 工作；用户需要 CAN ID、PduR、Com、Signal Gateway 或 I-PDU Group 等 AUTOSAR
@@ -62,6 +63,12 @@ Debug Skill 只在阶段之间传递 CAN ID、Message/PDU/Signal 名、源/目�
 时间范围和已确认现象等有限事实。原始帧列表、整份 ARXML、大段源码和整批 Tool 结果
 不跨域复制。Trace 与 Config 矛盾时优先检查 BLF、DBC、工程源码和 ARXML 的版本一致性，
 不把相关性直接写成因果。
+
+跨 Channel 调查必须先把用户明确给出的“逻辑网段 ↔ 分析 Channel ↔ ECU Channel”登记到
+Trace Session；配置顺序和命名均不能用于猜测映射。CAN→LIN timeout 使用专用关联查询，
+静态侧使用 `trace_autosar_runtime_chain` 组织 CanIf/PduR/Com/LinIf/OS-RTE/BswM/ComM/
+CDD 的生产者、消费者、任务、处理模式、控制引用与限定范围反证。用户要求持久化时，
+Config MCP 可在明确输出目录创建 JSON investigation bundle 并确定性导出 Markdown。
 
 ## Codex Subagent 增强 TODO
 

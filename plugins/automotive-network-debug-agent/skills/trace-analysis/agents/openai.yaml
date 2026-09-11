@@ -1,7 +1,7 @@
 interface:
   display_name: "Trace Analysis"
-  short_description: "使用本地 BLF 与 DBC/LDF 调查 CAN 和 LIN Trace 现象"
-  default_prompt: "使用 $trace-analysis 分析我提供的 BLF、可选 DBC/ARXML/LDF 和问题描述。"
+  short_description: "分析 BLF 中 CAN/LIN 现象、时序及跨通道 timeout 关联"
+  default_prompt: "使用 $trace-analysis 按我明确提供的 Channel 映射分析 BLF、可选 DBC/ARXML/LDF 和问题描述。"
 
 policy:
   allow_implicit_invocation: true

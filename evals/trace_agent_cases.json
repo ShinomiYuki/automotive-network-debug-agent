@@ -52,6 +52,13 @@
       "expected_tool_plan": ["load_trace", "get_trace_load_status", "find_messages", "find_messages"],
       "plan_note": "只确认 Trace 现象，并明确单凭 Trace 不能定位 PduR 根因。",
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal"]
+    },
+    {
+      "id": "can_to_lin_timeout_correlation",
+      "question": "Channel 映射、BLF、DBC/LDF、CAN 0x207、LIN 0x2A、TimeoutStatus=1 和 500 ms timeout 均已提供；比较 LIN8/LIN9 的 timeout 延迟。",
+      "expected_tool_plan": ["get_trace_health", "load_trace", "get_trace_load_status", "set_channel_mapping", "analyze_routed_signal_timeout"],
+      "plan_note": "必须先登记用户映射，一次返回每个目标 Channel 的统计和异常原始帧，不分轮手工配对。",
+      "forbidden_tools": ["get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal"]
     }
   ]
 }

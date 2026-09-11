@@ -18,16 +18,27 @@ EVAL_PATH = ROOT / "evals" / "config_agent_cases.json"
 FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "config"
 
 CONFIG_TOOLS = {
+    "get_config_health",
+    "create_investigation_bundle",
+    "record_investigation_evidence",
+    "update_investigation_state",
+    "get_investigation_summary",
+    "export_investigation_markdown",
     "load_config_workspace",
     "get_config_load_status",
     "search_config_symbol",
     "search_source_symbol",
+    "plan_source_search",
+    "search_source_evidence",
+    "read_source_lines",
+    "get_project_index_status",
     "inspect_source_symbol",
     "trace_message_route",
     "inspect_pdu",
     "inspect_communication",
     "trace_signal_gateway",
     "inspect_ipdu_group",
+    "trace_autosar_runtime_chain",
     "find_source_context",
 }
 OUTPUT_SECTIONS = ["配置判断", "关键证据", "不确定项", "下一步建议"]
@@ -73,6 +84,11 @@ def test_config_skill_covers_tools_minimal_routing_and_evidence_boundaries():
     assert "不调用 `automotive-trace`" in content
     assert "不输出 Python traceback" in content
     assert "不重复加载同一输入" in content
+    assert "`plan_source_search`" in content
+    assert "`search_source_evidence`" in content
+    assert "`read_source_lines`" in content
+    assert "`trace_autosar_runtime_chain`" in content
+    assert "NOT_FOUND_IN_SCOPE" in content
 
 
 def test_config_eval_cases_use_only_existing_tools_and_minimal_loads():
@@ -90,6 +106,8 @@ def test_config_eval_cases_use_only_existing_tools_and_minimal_loads():
         "source_symbol",
         "insufficient_runtime_evidence",
         "ambiguous_message",
+        "large_generated_source_batch",
+        "autosar_runtime_chain",
     }
     for case in specification["cases"]:
         plan = case["expected_tool_plan"]

@@ -13,6 +13,8 @@ from anda.common.errors import (
     ConfigNotReadyError,
     ConfigParseError,
 )
+from anda.config.models import ConfigEvidence, ConfigObject
+from anda.config.runtime_chain import _module_from_config
 from anda.config.workspace import ConfigWorkspaceManager
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -400,3 +402,92 @@ def test_invalid_workspace_and_malformed_arxml_return_domain_errors(tmp_path):
     malformed.write_text("<AUTOSAR><SHORT-NAME>broken", encoding="utf-8")
     with pytest.raises(ConfigParseError, match="ARXML 格式损坏"):
         manager.load_config_workspace(str(tmp_path))
+
+
+def test_project_index_tools_batch_evidence_and_read_exact_lines(loaded_workspace):
+    manager, workspace_id = loaded_workspace
+    generated = FIXTURE_ROOT / "generated" / "PduR_Lcfg.c"
+
+    plan = manager.plan_source_search(
+        workspace_id, "message_route", ["PduRRoutingPath_416_SU"]
+    )
+    evidence = manager.search_source_evidence(
+        workspace_id,
+        ["PduRRoutingPath_416_SU", "DefinitelyMissing"],
+        modules=["PduR"],
+        max_chars_per_match=500,
+    )
+    lines = manager.read_source_lines(
+        workspace_id, str(generated), [[4, 5]], max_chars_per_line=500
+    )
+    status = manager.get_project_index_status(workspace_id)
+
+    assert plan["stages"][0]["candidate_file_count"] >= 1
+    match = evidence["results"][0]["matches"][0]
+    assert match["module"] == "PduR"
+    assert match["generated_source"] is True
+    assert match["generation_origin_status"] == "EXACT_IDENTIFIER_MATCH"
+    assert evidence["not_found"] == ["DefinitelyMissing"]
+    assert lines["returned_line_count"] == 2
+    assert lines["lines"][0]["line"] == 4
+    assert status["backend"] == "sqlite"
+    assert status["invalidation_key"] == [
+        "absolute_path",
+        "file_size",
+        "last_modified_time_ns",
+    ]
+
+
+def test_runtime_chain_reports_producer_consumer_and_counter_evidence(
+    loaded_workspace,
+):
+    manager, workspace_id = loaded_workspace
+
+    result = manager.trace_autosar_runtime_chain(
+        workspace_id,
+        "VehicleSpeed",
+        ["VehicleSpeed_Rx", "VehicleSpeed_Tx", "PduRRoutingPath_416_SU"],
+    )
+
+    assert {item["role"] for item in result["producer_consumer"]} == {
+        "producer",
+        "consumer",
+    }
+    assert any(
+        item.get("group_reference", "").endswith("TxGroup")
+        for item in result["ipdu_groups"]
+    )
+    assert result["query_plan"]["strategy"].startswith("file_inventory")
+    assert result["counter_evidence"][0]["result"] in {
+        "FOUND",
+        "NOT_FOUND_IN_SCOPE",
+    }
+    assert result["runtime_order_inferred"] is False
+    assert result["root_cause_inferred"] is False
+
+
+def test_runtime_chain_module_classifier_does_not_match_os_inside_autosar():
+    evidence = ConfigEvidence("test.arxml", 1, "container", "CanTpConfig")
+    ordinary = ConfigObject(
+        name="CanTpConfig",
+        long_name=None,
+        kind="ECUC-CONTAINER-VALUE",
+        reference_path="/ActiveEcuC/CanTpConfig",
+        definition_ref="/AUTOSAR/EcucDefs/CanTp/CanTpConfig",
+        parameter_values=(),
+        reference_values=(),
+        evidence=evidence,
+    )
+    os_object = ConfigObject(
+        name="OsConfig",
+        long_name=None,
+        kind="ECUC-CONTAINER-VALUE",
+        reference_path="/ActiveEcuC/OsConfig",
+        definition_ref="/AUTOSAR/EcucDefs/Os/OsConfig",
+        parameter_values=(),
+        reference_values=(),
+        evidence=evidence,
+    )
+
+    assert _module_from_config(ordinary) == "Other"
+    assert _module_from_config(os_object) == "OS/RTE"

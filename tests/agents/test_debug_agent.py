@@ -16,25 +16,39 @@ MCP_MANIFEST_PATH = PLUGIN_ROOT / ".mcp.json"
 EVAL_PATH = ROOT / "evals" / "debug_agent_cases.json"
 
 TRACE_TOOLS = {
+    "get_trace_health",
     "load_trace",
     "get_trace_load_status",
     "get_trace_summary",
+    "set_channel_mapping",
     "find_messages",
     "get_message_timing",
+    "analyze_routed_signal_timeout",
     "search_database",
     "decode_signal",
 }
 CONFIG_TOOLS = {
+    "get_config_health",
+    "create_investigation_bundle",
+    "record_investigation_evidence",
+    "update_investigation_state",
+    "get_investigation_summary",
+    "export_investigation_markdown",
     "load_config_workspace",
     "get_config_load_status",
     "search_config_symbol",
     "search_source_symbol",
+    "plan_source_search",
+    "search_source_evidence",
+    "read_source_lines",
+    "get_project_index_status",
     "inspect_source_symbol",
     "trace_message_route",
     "inspect_pdu",
     "inspect_communication",
     "trace_signal_gateway",
     "inspect_ipdu_group",
+    "trace_autosar_runtime_chain",
     "find_source_context",
 }
 ALL_TOOLS = TRACE_TOOLS | CONFIG_TOOLS
@@ -51,6 +65,7 @@ CASE_IDS = {
     "insufficient_cross_domain_evidence",
     "missing_inputs_asks_minimum",
     "config_then_trace_when_route_exists",
+    "can_to_lin_timeout_with_report",
 }
 
 
@@ -93,6 +108,10 @@ def test_debug_skill_defines_dynamic_routes_evidence_rules_and_fixed_output():
     assert "不要把事实结论重述成故障原因" in content
     assert "不调用其他 Skill" in content
     assert "不修改配置、源码或日志" in content
+    assert "`analyze_routed_signal_timeout`" in content
+    assert "`trace_autosar_runtime_chain`" in content
+    assert "`create_investigation_bundle`" in content
+    assert (SKILL_ROOT / "references" / "investigation-workflow.md").is_file()
 
 
 def test_debug_eval_covers_routes_stage_gates_handoffs_and_minimal_loads():
@@ -128,13 +147,26 @@ def test_debug_eval_covers_routes_stage_gates_handoffs_and_minimal_loads():
 
         if case["route"] == "trace_only":
             assert set(plan) <= TRACE_TOOLS
-            assert CONFIG_TOOLS <= set(forbidden)
+            assert {
+                "load_config_workspace",
+                "get_config_load_status",
+                "trace_message_route",
+            } <= set(forbidden)
         elif case["route"] == "config_only":
             assert set(plan) <= CONFIG_TOOLS
-            assert TRACE_TOOLS <= set(forbidden)
+            assert {
+                "load_trace",
+                "get_trace_load_status",
+                "find_messages",
+            } <= set(forbidden)
         elif case["route"] == "ask_input":
             assert plan == []
-            assert set(forbidden) == ALL_TOOLS
+            assert {
+                "load_trace",
+                "load_config_workspace",
+                "find_messages",
+                "trace_message_route",
+            } <= set(forbidden)
 
 
 def test_debug_eval_encodes_conflict_and_non_inference_boundaries():

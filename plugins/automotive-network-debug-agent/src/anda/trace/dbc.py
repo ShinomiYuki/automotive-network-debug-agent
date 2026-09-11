@@ -151,6 +151,55 @@ class NetworkDatabase:
             )
         return candidates[0]
 
+    def resolve_message(
+        self,
+        selector: str,
+        *,
+        bus_type: str | None = None,
+        database_file: str | None = None,
+    ) -> DatabaseMessage:
+        """按十六进制/十进制 ID 或精确报文名解析唯一数据库报文。"""
+        value = selector.strip()
+        if not value:
+            raise TraceDatabaseError("报文选择器不能为空")
+        parsed_id = None
+        try:
+            if value.casefold().startswith("0x") or value.isdecimal():
+                parsed_id = int(value, 0)
+        except ValueError:
+            parsed_id = None
+        candidates = [
+            message
+            for message in self.messages
+            if (
+                (parsed_id is not None and message.frame_id == parsed_id)
+                or message.name.casefold() == value.casefold()
+            )
+            and (bus_type is None or message.bus_type == bus_type)
+            and (
+                database_file is None
+                or message.path.name.casefold() == database_file.casefold()
+                or str(message.path).casefold() == database_file.casefold()
+            )
+        ]
+        if not candidates:
+            raise TraceDatabaseError(f"数据库中未找到报文：{selector}")
+        unique = {
+            (item.bus_type, item.frame_id, str(item.path).casefold()): item
+            for item in candidates
+        }
+        candidates = list(unique.values())
+        if len(candidates) > 1:
+            options = ", ".join(
+                f"{item.bus_type.upper()} 0x{item.frame_id:X} {item.name} "
+                f"({item.path.name})"
+                for item in candidates[:20]
+            )
+            raise TraceDatabaseError(
+                f"报文选择器存在多个候选，请补充 bus_type/database_file：{options}"
+            )
+        return candidates[0]
+
     def search(self, query: str) -> list[dict]:
         """按报文名或信号名搜索轻量候选，不返回整个数据库。"""
         normalized_query = query.casefold()

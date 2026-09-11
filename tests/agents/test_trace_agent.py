@@ -16,11 +16,14 @@ MARKETPLACE_PATH = ROOT / ".agents" / "plugins" / "marketplace.json"
 EVAL_PATH = ROOT / "evals" / "trace_agent_cases.json"
 
 TOOLS = {
+    "get_trace_health",
     "load_trace",
     "get_trace_load_status",
     "get_trace_summary",
+    "set_channel_mapping",
     "find_messages",
     "get_message_timing",
+    "analyze_routed_signal_timeout",
     "search_database",
     "decode_signal",
 }
@@ -57,6 +60,9 @@ def test_trace_skill_defines_minimal_routes_output_and_evidence_boundary():
     assert "已回答用户问题后立即停止" in content
     assert "不得重复 `load_trace`" in content
     assert 'bus_type="lin"' in content
+    assert "不从名称、排序、ARXML 或数据库猜测" in content
+    assert "`analyze_routed_signal_timeout`" in content
+    assert "ecu_internal_send_time" in content
 
 
 def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
@@ -114,6 +120,7 @@ def test_eval_cases_cover_expected_tools_and_fixed_output_contract():
         "lin_signal_decode_with_ldf",
         "signal_decode_without_database",
         "insufficient_root_cause_evidence",
+        "can_to_lin_timeout_correlation",
     }
     for case in specification["cases"]:
         assert set(case["expected_tool_plan"]) <= TOOLS

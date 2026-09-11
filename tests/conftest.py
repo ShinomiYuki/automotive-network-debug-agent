@@ -8,6 +8,7 @@ from pathlib import Path
 
 import can
 import pytest
+from vblf.can import CanMessage
 from vblf.constants import ObjFlags, ObjType
 from vblf.general import ObjectHeader
 from vblf.lin import LinMessage
@@ -156,4 +157,81 @@ Node_attributes {
     with BlfWriter(blf_path) as writer:
         writer.write(message)
 
+    return blf_path, ldf_path
+
+
+@pytest.fixture()
+def routed_timeout_files(tmp_path: Path) -> tuple[Path, Path]:
+    """生成一段 CAN 停止后 LIN8/LIN9 分别晚 1/2 帧切换 timeout 的 BLF。"""
+    ldf_path = tmp_path / "timeout.ldf"
+    ldf_path.write_text(
+        """LIN_description_file;
+LIN_protocol_version = "2.1";
+LIN_language_version = "2.1";
+LIN_speed = 19.2 kbps;
+Nodes { Master: Master, 5 ms, 0.1 ms; Slaves: Slave; }
+Signals { TimeoutStatus: 8, 63, Master, Slave; }
+Frames { LinStatus: 42, Master, 8 { TimeoutStatus, 0; } }
+Node_attributes {
+  Slave {
+    LIN_protocol = "2.1";
+    configured_NAD = 0x01;
+    product_id = 0x0, 0x0, 0;
+    P2_min = 50 ms;
+    ST_min = 0 ms;
+    N_As_timeout = 1000 ms;
+    N_Cr_timeout = 1000 ms;
+    configurable_frames { LinStatus; }
+  }
+}
+""",
+        encoding="ascii",
+    )
+
+    objects = []
+    for milliseconds in (0, 100, 800):
+        objects.append(
+            CanMessage.new(
+                ObjFlags.TIME_ONE_NANS,
+                milliseconds * 1_000_000,
+                1,
+                0,
+                8,
+                0x207,
+                bytes.fromhex("3F 00 00 00 00 00 00 00"),
+            )
+        )
+    target_values = {
+        8: [(580, 0x3F), (600, 0x3F), (620, 0x00), (820, 0x3F)],
+        9: [(580, 0x3F), (600, 0x3F), (620, 0x3F), (640, 0x00), (840, 0x3F)],
+    }
+    for channel, samples in target_values.items():
+        for milliseconds, value in samples:
+            header = ObjectHeader.new(
+                ObjectHeader.SIZE + LinMessage._FORMAT.size,
+                ObjType.LIN_MESSAGE,
+                ObjFlags.TIME_ONE_NANS,
+                0,
+                milliseconds * 1_000_000,
+            )
+            objects.append(
+                LinMessage(
+                    header=header,
+                    channel=channel,
+                    id=0x2A,
+                    dlc=8,
+                    data=bytes([value]) + bytes(7),
+                    fsm_id=0,
+                    fsm_state=0,
+                    header_time=0,
+                    full_time=0,
+                    crc=0,
+                    dir=0,
+                    reserved=bytes(5),
+                )
+            )
+    blf_path = tmp_path / "routed-timeout.blf"
+    with BlfWriter(blf_path) as writer:
+        for item in sorted(objects, key=lambda value: value.header.object_time_stamp):
+            writer.write(item)
     return blf_path, ldf_path

@@ -9,10 +9,12 @@ description: 使用 Automotive Trace MCP 调查 BLF 中的 CAN/CAN FD/LIN 帧存
 
 ## 输入与起点
 
+- 在检查安装/升级后注册、排查 MCP 可用性，或 CAN→LIN timeout 等复杂工作流明确要求预检时，只调用一次 `get_trace_health`。普通 BLF 事实查询保持最短 Tool 路径。若预检时工具目录中没有该 Tool，明确说明 Trace MCP 未注册或会话缓存未刷新；后端 unavailable 时报告缺失项并停止。
 - 接受用户直接描述问题，也接受工程问题清单常用的结构化文本：可选的“测试路由/测试网段”，以及“简要描述、前提条件、操作步骤、预期结果、实际结果”。从这些字段提取调查对象和预期，不把“实际结果”直接当成已经由日志证明的事实。
 - 从用户问题提取 BLF 绝对路径、一个或多个可选数据库文件/目录绝对路径、CAN/LIN 帧 ID、1-based Channel、信号名和时间范围。日志或数据库可以位于任意本机路径，不要求当前工作目录是插件源码仓库。
 - 缺少继续调查必需的信息时，只询问缺失项，不猜路径、CAN ID、Channel、信号或源/目标网段映射。
 - 每份输入先调用一次 `load_trace`。若返回 `index_ready=false`，使用同一 `trace_id` 调用 `get_trace_load_status(wait_seconds=55)`，仍未完成时只重复状态查询；不得重复 `load_trace`。状态为 `failed` 时报告加载错误并停止。
+- 需要比较两个或多个 Channel、逻辑网段或 ECU Channel 时，加载完成后先调用一次 `set_channel_mapping` 登记用户明确给出的映射。每项至少包含 `analysis_channel`、`bus_type`、`logical_network` 和 `mapping_source`；可选 `ecu_channel` 与证据。映射缺失或冲突时先询问，不从名称、排序、ARXML 或数据库猜测。
 - 查询 LIN 时显式传入 `bus_type="lin"`；查询 CAN/CAN FD 时在可能与 LIN ID 重叠的场景传入 `bus_type="can"`。Tool 的 `arbitration_id` 参数对 LIN 表示 0x00 至 0x3F 的 Frame ID。
 - 普通样本查询的 `limit` 使用 20；只有用户明确需要更多样本时才提高，且不得超过 Tool 上限。
 
@@ -45,9 +47,16 @@ description: 使用 Automotive Trace MCP 调查 BLF 中的 CAN/CAN FD/LIN 帧存
 3. 只有得到唯一、名称精确匹配的信号候选后，才调用 `decode_signal`，使用候选 Frame ID、`bus_type`、`database_file`、`matched_signal_names` 返回的规范信号名、可选 Channel/时间范围及 `limit=20`。
 4. 没有候选时报告数据库未找到；存在多个候选时列出候选并请用户确认，不擅自选择，也不调用 `decode_signal`。
 
+### CAN 到 LIN 的 timeout 关联
+
+1. 仅在用户已经提供源 CAN Channel、目标 LIN Channel、数据库、目标信号 timeout 值和配置 timeout 时使用；任一 Channel 映射不明确都先询问。
+2. `load_trace` 完成后调用 `set_channel_mapping`，再调用一次 `analyze_routed_signal_timeout`。目标 LIN Channel 一次性传入 `target_channels`，并用 `target_database_files` 明确每个 Channel 的 LDF；不要按 Channel 分拆成多轮手工配对。
+3. 使用返回的每个事件最后源帧、目标旧值、首个 timeout 值、源到目标延迟、真实 LIN 帧缺口和每 Channel min/P50/P95/max。只把 Tool 标出的有界异常原始帧作为证据。
+4. 配置上限（例如 timeout + 一个 LIN 周期）必须来自用户或 Config 证据；不得由 Trace 自行创造。结果只证明时序相关性，不证明 Com、PduR、LinIf、CDD 或硬件根因。
+
 ### 日志整体概览
 
-只有用户询问日志整体范围、帧数、Channel 或 CAN/CAN FD/LIN 构成时，才调用 `get_trace_summary`。针对明确帧 ID 或信号的问题，不要例行调用摘要。
+只有用户询问日志整体范围、帧数、Channel、CAN/CAN FD/LIN 构成或 BLF 时间戳语义时，才调用 `get_trace_summary`。`timestamp_reference` 为 BLF logger object header 的采集时钟；当 `capture_point` 或 `ecu_internal_send_time` 为 `UNKNOWN` 时，不把显示时间描述为 ECU 内部发送时刻。针对明确帧 ID 或信号且结果已含时间戳语义的问题，不要例行调用摘要。
 
 ## 证据与停止规则
 

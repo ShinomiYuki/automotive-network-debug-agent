@@ -27,5 +27,8 @@ samples/
 # 工程输入
 input/
 
+# 本地报告输出
+output/
+
 # vscode配置
 .vscode/

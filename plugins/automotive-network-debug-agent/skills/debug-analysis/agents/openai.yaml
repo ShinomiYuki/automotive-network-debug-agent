@@ -1,7 +1,7 @@
 interface:
   display_name: "Debug Analysis"
-  short_description: "动态联合 Trace 与工程配置证据定位汽车网络故障原因"
-  default_prompt: "使用 $debug-analysis 联合调查我提供的汽车网络故障问题、日志和工程配置证据。"
+  short_description: "联合 Trace、配置、源码与反证定位汽车网络故障原因"
+  default_prompt: "使用 $debug-analysis 联合调查我提供的日志、Channel 映射、工程配置并按需生成证据报告。"
 
 policy:
   allow_implicit_invocation: true

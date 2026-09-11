@@ -19,8 +19,9 @@ from anda.common.errors import (
     TraceNotFoundError,
     TraceNotReadyError,
 )
-from anda.trace.blf import iter_blf
+from anda.trace.blf import iter_blf, read_blf_metadata
 from anda.trace.dbc import NetworkDatabase, resolve_database_files
+from anda.trace.routed_timeout import analyze_routed_signal_timeout
 from anda.trace.store import CompactFrameStore
 from anda.trace.timing import analyze_timestamps
 
@@ -37,6 +38,8 @@ class TraceSession:
     database_paths: tuple[Path, ...]
     store: CompactFrameStore
     database: NetworkDatabase | None
+    metadata: dict
+    channel_mapping: dict[tuple[str, int], dict] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -211,11 +214,12 @@ class TraceSessionManager:
         database_files: tuple[Path, ...],
         progress_callback=None,
     ) -> TraceSession:
+        metadata = read_blf_metadata(blf)
         database = NetworkDatabase(database_files) if database_files else None
         store = CompactFrameStore()
         for frame in iter_blf(blf, progress_callback):
             store.append(frame)
-        return TraceSession(blf, database_files, store, database)
+        return TraceSession(blf, database_files, store, database, metadata)
 
     @staticmethod
     def _load_result(trace_id: str, session: TraceSession, reused: bool) -> dict:
@@ -297,7 +301,59 @@ class TraceSessionManager:
             "can_fd_frame_count": store.can_fd_count,
             "lin_frame_count": store.lin_frame_count,
             "error_frame_count": store.error_frame_count,
+            "timestamp_reference": session.metadata["timestamp_reference"],
+            "blf_metadata": {
+                key: value
+                for key, value in session.metadata.items()
+                if key != "timestamp_reference"
+            },
+            "channel_mapping": sorted(
+                session.channel_mapping.values(),
+                key=lambda item: (item["bus_type"], item["analysis_channel"]),
+            ),
+            "channel_mapping_count": len(session.channel_mapping),
+            "channel_mapping_completeness": "UNKNOWN_WITHOUT_REQUIRED_CHANNEL_SET",
         }
+
+    def set_channel_mapping(self, trace_id: str, mappings: list[dict]) -> dict:
+        """登记用户明确给出的分析仪、逻辑网段和 ECU Channel 对应关系。"""
+        session = self._get(trace_id)
+        normalized = _validate_channel_mappings(mappings)
+        for item in normalized:
+            key = (item["bus_type"], item["analysis_channel"])
+            existing = session.channel_mapping.get(key)
+            if existing is not None and existing != item:
+                raise TraceInputError(
+                    f"{item['bus_type'].upper()}{item['analysis_channel']} 已有不同映射；"
+                    "请明确修正后重新加载 Trace，不能自动覆盖"
+                )
+            session.channel_mapping[key] = item
+        return {
+            "trace_id": trace_id,
+            "mapping_count": len(session.channel_mapping),
+            "mappings": sorted(
+                session.channel_mapping.values(),
+                key=lambda item: (item["bus_type"], item["analysis_channel"]),
+            ),
+            "mapping_basis": "explicit_user_or_user_supplied_evidence",
+            "mapping_inferred": False,
+        }
+
+    def require_channel_mapping(
+        self, trace_id: str, channels: list[tuple[str, int]]
+    ) -> list[dict]:
+        session = self._get(trace_id)
+        missing = [
+            f"{bus.upper()}{channel}"
+            for bus, channel in channels
+            if (bus, channel) not in session.channel_mapping
+        ]
+        if missing:
+            raise TraceInputError(
+                "跨网段分析前必须通过 set_channel_mapping 明确提供映射；缺少："
+                + ", ".join(missing)
+            )
+        return [session.channel_mapping[item] for item in channels]
 
     def find_messages(
         self,
@@ -370,6 +426,54 @@ class TraceSessionManager:
                 "channel": channel,
                 "start_timestamp": start_timestamp,
                 "end_timestamp": end_timestamp,
+            }
+        )
+        return result
+
+    def analyze_routed_signal_timeout(
+        self,
+        trace_id: str,
+        source_channel: int,
+        source_message: str,
+        target_channels: list[int],
+        target_frame: str,
+        signal_name: str,
+        timeout_value: object,
+        configured_timeout_ms: float,
+        source_bus_type: str = "can",
+        target_bus_type: str = "lin",
+        source_database_file: str | None = None,
+        target_database_files: dict[str, str] | None = None,
+    ) -> dict:
+        """一次关联源停止与多个目标 timeout 值切换，不推断运行时根因。"""
+        source_bus_type = source_bus_type.strip().casefold()
+        target_bus_type = target_bus_type.strip().casefold()
+        mappings = self.require_channel_mapping(
+            trace_id,
+            [(source_bus_type, source_channel)]
+            + [(target_bus_type, channel) for channel in target_channels],
+        )
+        session = self._get(trace_id)
+        result = analyze_routed_signal_timeout(
+            store=session.store,
+            database=session.database,
+            source_channel=source_channel,
+            source_message=source_message,
+            target_channels=target_channels,
+            target_frame=target_frame,
+            signal_name=signal_name,
+            timeout_value=timeout_value,
+            configured_timeout_ms=configured_timeout_ms,
+            source_bus_type=source_bus_type,
+            target_bus_type=target_bus_type,
+            source_database_file=source_database_file,
+            target_database_files=target_database_files,
+        )
+        result.update(
+            {
+                "trace_id": trace_id,
+                "channel_mapping": mappings,
+                "timestamp_reference": session.metadata["timestamp_reference"],
             }
         )
         return result
@@ -520,3 +624,52 @@ class TraceSessionManager:
         ):
             raise TraceInputError("start_timestamp 不能晚于 end_timestamp")
         return bus_type
+
+
+def _validate_channel_mappings(mappings: list[dict]) -> list[dict]:
+    if not mappings or len(mappings) > 64:
+        raise TraceInputError("mappings 必须包含 1 到 64 条明确 Channel 映射")
+    result = []
+    seen: set[tuple[str, int]] = set()
+    for raw in mappings:
+        try:
+            channel = int(raw["analysis_channel"])
+            bus_type = str(raw["bus_type"]).strip().casefold()
+            logical_network = str(raw["logical_network"]).strip()
+            mapping_source = str(raw["mapping_source"]).strip()
+        except (KeyError, TypeError, ValueError) as error:
+            raise TraceInputError(
+                "每条映射必须包含 analysis_channel、bus_type、logical_network、"
+                "mapping_source"
+            ) from error
+        if channel < 1:
+            raise TraceInputError("analysis_channel 使用 1-based 编号")
+        if bus_type not in {"can", "lin"}:
+            raise TraceInputError("Channel 映射的 bus_type 仅支持 can 或 lin")
+        if not logical_network or not mapping_source:
+            raise TraceInputError("logical_network 和 mapping_source 不能为空")
+        key = (bus_type, channel)
+        if key in seen:
+            raise TraceInputError(
+                f"mappings 中重复定义 {bus_type.upper()}{channel}"
+            )
+        seen.add(key)
+        result.append(
+            {
+                "analysis_channel": channel,
+                "bus_type": bus_type,
+                "logical_network": logical_network,
+                "ecu_channel": (
+                    str(raw["ecu_channel"]).strip()
+                    if raw.get("ecu_channel") is not None
+                    else None
+                ),
+                "mapping_source": mapping_source,
+                "evidence": (
+                    str(raw["evidence"]).strip()
+                    if raw.get("evidence") is not None
+                    else None
+                ),
+            }
+        )
+    return result

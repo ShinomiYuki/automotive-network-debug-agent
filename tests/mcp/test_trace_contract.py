@@ -15,11 +15,14 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
         async with Client(mcp) as client:
             tools = await client.list_tools()
             assert {tool.name for tool in tools} == {
+                "get_trace_health",
                 "load_trace",
                 "get_trace_load_status",
                 "get_trace_summary",
+                "set_channel_mapping",
                 "find_messages",
                 "get_message_timing",
+                "analyze_routed_signal_timeout",
                 "search_database",
                 "decode_signal",
             }
@@ -31,6 +34,13 @@ def test_trace_mcp_contract_and_session_reuse(trace_files):
                 assert tool.annotations.destructive_hint is False
                 assert tool.annotations.idempotent_hint is True
                 assert tool.annotations.open_world_hint is False
+
+            health = await client.call_tool("get_trace_health", {})
+            assert health.data["trace_mcp"]["status"] == "available"
+            assert health.data["config_mcp"]["status"] == (
+                "configured_not_runtime_verified"
+            )
+            assert health.data["openai_api_required"] is False
 
             first = await client.call_tool(
                 "load_trace",

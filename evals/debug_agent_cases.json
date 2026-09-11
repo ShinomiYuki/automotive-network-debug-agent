@@ -153,6 +153,20 @@
       ],
       "expected_behavior": ["第二阶段由 Config 结果触发", "只传递有限配置事实"],
       "forbidden_tools": ["get_trace_summary", "get_message_timing", "search_database", "decode_signal", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "can_to_lin_timeout_with_report",
+      "route": "trace_then_config",
+      "question": "映射、BLF、DBC/LDF、工程、明确 ARXML 和输出目录均已提供；调查 CAN 0x207 到 LIN 0x2A 的 timeout 延迟、跨层链与反证并生成 Markdown 报告。",
+      "provided_inputs": ["blf", "dbc", "ldf", "project", "arxml", "channel_mapping", "output_directory"],
+      "expected_tool_plan": ["get_trace_health", "get_config_health", "create_investigation_bundle", "load_trace", "get_trace_load_status", "set_channel_mapping", "analyze_routed_signal_timeout", "record_investigation_evidence", "load_config_workspace", "get_config_load_status", "trace_autosar_runtime_chain", "record_investigation_evidence", "update_investigation_state", "get_investigation_summary", "export_investigation_markdown"],
+      "expected_stages": [
+        {"domain": "preflight", "tools": ["get_trace_health", "get_config_health", "create_investigation_bundle"]},
+        {"domain": "trace", "after_observation": "两个 MCP 与解析后端可用", "tools": ["load_trace", "get_trace_load_status", "set_channel_mapping", "analyze_routed_signal_timeout", "record_investigation_evidence"], "handoff_facts": ["arbitration_id", "signal", "channel_mapping", "time_range", "observed_presence"]},
+        {"domain": "config", "after_observation": "Trace 已形成可审计 timeout 事件", "tools": ["load_config_workspace", "get_config_load_status", "trace_autosar_runtime_chain", "record_investigation_evidence", "update_investigation_state", "get_investigation_summary", "export_investigation_markdown"], "handoff_facts": ["arbitration_id", "signal", "source_network", "destination_network", "expected_communication"]}
+      ],
+      "expected_behavior": ["不猜 Channel", "每个候选包含反证和置信度", "PDF 不可用时明确只导出 Markdown/JSON"],
+      "forbidden_tools": ["get_trace_summary", "find_messages", "get_message_timing", "search_database", "decode_signal", "search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
     }
   ]
 }

@@ -51,6 +51,62 @@ _FD64_ESI = 0x4000
 _PROGRESS_INTERVAL = 100_000
 
 
+def read_blf_metadata(path: str | Path) -> dict:
+    """读取 BLF 文件头，并明确时间戳能与不能证明的语义。"""
+    path = Path(path)
+    if not path.is_file():
+        raise TraceInputError(f"BLF 文件不存在: {path}")
+    try:
+        with BlfReader(str(path)) as reader:
+            statistics = reader.file_statistics
+            start = (
+                statistics.measurement_start_time.to_datetime()
+                .replace(tzinfo=UTC)
+                .timestamp()
+            )
+            try:
+                last = (
+                    statistics.last_object_time.to_datetime()
+                    .replace(tzinfo=UTC)
+                    .timestamp()
+                )
+            except (AttributeError, OSError, OverflowError, ValueError):
+                last = None
+            application = getattr(
+                statistics.application_id, "name", str(statistics.application_id)
+            )
+            return {
+                "measurement_start_timestamp": start,
+                "last_object_header_timestamp": last,
+                "application_id": application,
+                "application_version": (
+                    f"{statistics.application_major}."
+                    f"{statistics.application_minor}."
+                    f"{statistics.application_build}"
+                ),
+                "api_number": statistics.api_number,
+                "declared_object_count": statistics.object_count,
+                "timestamp_reference": {
+                    "value": "BLF_MEASUREMENT_START_PLUS_OBJECT_OFFSET",
+                    "calculation": (
+                        "FileStatistics.measurement_start_time + "
+                        "ObjectHeader.object_time_stamp × ObjectHeader resolution"
+                    ),
+                    "object_resolution": "TIME_TEN_MICS_OR_TIME_ONE_NANS",
+                    "clock_domain": "BLF_LOGGER_CLOCK",
+                    "capture_point": "UNKNOWN",
+                    "ecu_internal_send_time": "UNKNOWN",
+                    "certainty": "PARTIAL",
+                    "warning": (
+                        "该显示时间来自 BLF 记录器对象头；未提供接口采集点配置时，"
+                        "不能等同于 ECU 内部发送时刻。"
+                    ),
+                },
+            }
+    except Exception as exc:
+        raise TraceInputError(f"BLF 文件头读取失败: {path.name}: {exc}") from exc
+
+
 @dataclass(slots=True)
 class _CompatCanFdMessage:
     """兼容 Vector/python-can 实际写出的 116 字节 CAN_FD_MESSAGE。"""

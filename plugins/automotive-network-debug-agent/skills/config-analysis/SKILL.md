@@ -9,10 +9,12 @@ description: 使用 Automotive Config MCP 调查用户明确提供的汽车工�
 
 ## 输入与 Workspace
 
+- 在检查安装/升级后注册、排查 MCP 可用性，或 CAN→LIN timeout 等复杂联合工作流明确要求预检时，只调用一次 `get_config_health`。普通静态查询保持最短 Tool 路径。若预检时工具目录中没有该 Tool，明确说明 Config MCP 未注册或会话缓存未刷新。
 - 从用户输入提取工程绝对路径、可选 ARXML 绝对路径、Message/CAN ID、源/目标网段、PDU、Signal、I-PDU Group 或源码标识符。路径可以位于任意本机位置，不要求绑定插件开发仓库。
 - 工程路径是必需调查范围；没有明确工程时先询问，不猜项目。ARXML 是可选补充：纯源码问题不强制要求；问题需要 AUTOSAR Route、CanIf 或 Com 关系但采用的 ARXML 不明确时，再请用户指定。
 - 多个工程或 ARXML 版本并存时不得自行选择。只把用户明确采用的 ARXML 传给 `arxml_paths`。
 - 每次调查先调用一次 `load_config_workspace`。若返回 `index_ready=false`，使用同一 `workspace_id` 调用 `get_config_load_status`，并把 `wait_seconds` 设为最多 55；仍未完成时只重复状态查询，不重复加载同一输入。状态为 `failed` 时报告加载错误并停止。索引完成后复用同一 ID；除非用户说明文件已变化，否则不使用 `force_reload`。
+- `get_config_load_status` 返回 stage、文件计数和耗时时，用它向用户简短报告当前索引阶段。冷索引完成后可用 `get_project_index_status` 查看 SQLite 缓存、复用文件数和按路径/大小/mtime 的增量失效事实；不要为每个问题重建索引。
 - Tool 返回多候选时，先使用用户已有的网段、Message、PDU 或完整路径缩小；仍不唯一就列入“不确定项”并请求必要条件，不选第一个。
 
 ## 选择最短 Tool 路径
@@ -21,10 +23,19 @@ description: 使用 Automotive Config MCP 调查用户明确提供的汽车工�
 
 ### 源码或 Generated Config 标识符
 
-- 名称明确时直接调用 `inspect_source_symbol`，默认 `limit=20`、`context_lines=2`。
+- 名称明确时直接调用 `inspect_source_symbol`，默认 `limit=20`、`context_lines=0`。
 - 名称不完整时先用 `search_source_symbol`，默认 `limit=20`；只有唯一明确候选才继续检查。
-- 仅在用户需要额外源码落点，且现有结果上下文不足时调用 `find_source_context`；通常使用 2 至 3 行，不拉满上限。
+- 多个完整标识符、超长 generated source 或明确跨模块问题先调用 `plan_source_search`，再把计划中的模块传给一次 `search_source_evidence`。默认只返回行号、数组/表名、局部窗口、解析字段、是否 generated 和精确 ARXML 生成来源；不逐关键词重复扫描。
+- `search_source_evidence` 的负向结果必须保留 `search_scope`、模块、source/generated 过滤和排除目录；“未命中”只适用于该范围。
+- 用户明确要求原文或已有精确行号时，才调用一次 `read_source_lines` 批量读取多个范围；默认 `max_chars_per_line=1000`。不要用整文件读取。
+- 仅在兼容旧流程且需要单个符号有限邻近行时调用 `find_source_context`；默认 0 行上下文，不拉满上限。
 - 源码和 ARXML 只有完整标识符一致或 Tool 返回显式引用时才视为关联。近似名称只是候选，不是关联证据。
+
+### 跨层 AUTOSAR 调用链
+
+- 对 CAN→LIN timeout、网关信号运行链、任务调度、buffered/deferred、callout/CDD、I-PDU Group 或 schedule 控制者问题，加载后直接调用 `trace_autosar_runtime_chain`，并把用户给出的额外完整标识符放入 `additional_identifiers`。
+- 输出生产者/消费者、缓冲和处理模式、任务周期/优先级、callout/CDD 插入点、I-PDU Group、schedule 控制者与各层文件/行号。`UNKNOWN` 保持未知，不由命名惯例补值。
+- 同时报告 `counter_evidence`：对某候选是在限定范围 FOUND 还是 NOT_FOUND_IN_SCOPE，并保留边界。静态链只表示配置/源码关系，不等于已执行顺序或运行时状态。
 
 ### Message/CAN ID 路由
 
@@ -64,6 +75,7 @@ description: 使用 Automotive Config MCP 调查用户明确提供的汽车工�
 - 缺少路径、配置损坏、对象未找到、候选冲突或 Tool 失败时，用业务语言说明，不输出 Python traceback。
 - 不调用 `automotive-trace`。需要动态证据时只在“下一步建议”中提出结合 BLF 验证。
 - 已回答用户问题后立即停止；不要调用全部 Tool，也不要重复获取同一证据。
+- 只有用户明确要求保存调查过程或生成报告时，才使用 investigation bundle 工具；写入目录必须由用户明确提供。`create_investigation_bundle` 后按类别使用 `record_investigation_evidence`，必要时 `update_investigation_state`，用 `get_investigation_summary` 核对数量，最终可用 `export_investigation_markdown`。当前确定性导出仅支持 JSON/Markdown，不声称已生成 PDF。
 
 ## 固定输出
 

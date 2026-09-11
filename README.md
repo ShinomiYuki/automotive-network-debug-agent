@@ -186,6 +186,10 @@ ARXML：D:\inputs\selected-project.arxml
 
 Debug Skill 会先用明确的网段到数字 Channel 映射在 BLF 中验证问题前提；若确认源网段存在而目标网段缺失，再把 `0x416`、`SU`、`IC` 和已确认现象传给 Config 调查路由。需要比较逻辑网段而映射未提供时会先询问，不从网段名猜 Channel。若 Trace 已推翻问题描述，或单个证据域已经回答问题，就不会机械调用另一 MCP。DBC 只在 Message/Signal 导航或信号解码确实需要时才要求。
 
+安装/升级验证、MCP 故障排查及 CAN→LIN timeout 等复杂工作流会先调用对应健康检查；普通事实查询保持最短 Tool 路径。跨 Channel 调查会把用户映射登记到当前 Trace Session；CAN→LIN timeout 可一次关联源报文停止和多个 LIN Channel 的旧值/timeout 值、延迟、周期、真实帧缺口及统计。Config 冷索引会建立工作区外的 SQLite 项目缓存，后续按文件绝对路径、大小和修改时间增量更新；每个 Workspace 固定到加载时的不可变 generation，避免与其他进程后续更新混用。可通过 `ANDA_CACHE_DIR` 指定公共缓存位置，不会把缓存写进工程。
+
+调查报告可以写到仓库根目录的 `output/`，该目录已纳入 `.gitignore`；其中内容属于本机案件输出，不会随源码提交。也可传入任意用户明确指定的外部输出目录。
+
 ## 单独启动 Trace MCP
 
 开发者在仓库根目录安装项目后运行：
@@ -217,11 +221,14 @@ python -m anda.mcp.config.server
 
 | Tool                 | 用途                                             |
 | -------------------- | ------------------------------------------------ |
+| `get_trace_health`   | 检查 Trace MCP、BLF/DBC/LDF 后端和插件注册状态 |
 | `load_trace`         | 启动 BLF 与可选数据库后台索引，立即返回 `trace_id` |
 | `get_trace_load_status` | 等待或查询索引进度，不重复启动相同加载          |
 | `get_trace_summary`  | 获取时间范围、帧数、Channel、CAN/CAN FD/LIN 摘要 |
+| `set_channel_mapping` | 登记用户明确提供的逻辑网段、分析 Channel 与 ECU Channel 映射 |
 | `find_messages`      | 按总线类型、帧 ID、Channel、时间范围查询有限原始帧 |
 | `get_message_timing` | 获取帧数、周期、最大间隔与抖动统计               |
+| `analyze_routed_signal_timeout` | 一次关联源 CAN 停止与多个目标 LIN Channel 的 timeout 时序 |
 | `search_database`    | 按 Message/Signal 名搜索至多 20 个数据库导航候选 |
 | `decode_signal`      | 使用 DBC/ARXML/LDF 解码指定 CAN/LIN 信号并返回有限样本 |
 
@@ -229,8 +236,13 @@ python -m anda.mcp.config.server
 
 | Tool | 用途 |
 | --- | --- |
+| `get_config_health` | 检查 Config MCP、ARXML/SQLite 后端和插件注册状态 |
 | `load_config_workspace` | 启动工程和明确 ARXML 的后台索引，立即返回 `workspace_id` |
 | `get_config_load_status` | 等待或查询工程索引状态，不重复启动相同加载 |
+| `get_project_index_status` | 查看 SQLite 缓存、增量复用和失效依据 |
+| `plan_source_search` | 先按问题类型、模块和文件名规划最小源码范围 |
+| `search_source_evidence` | 批量查询完整标识符并返回有界源码证据与负向范围 |
+| `read_source_lines` | 按行 byte offset 批量读取明确范围，避免整文件加载 |
 | `search_config_symbol` | 查询 Message、CAN ID、PDU、配置对象或源码符号 |
 | `search_source_symbol` | 按完整名、前缀或子串搜索工程源码标识符 |
 | `inspect_source_symbol` | 以完整源码标识符为入口，查看角色、上下文和同名配置证据 |
@@ -239,7 +251,13 @@ python -m anda.mcp.config.server
 | `inspect_communication` | 汇总 Message/PDU 的 CanIf、Com、时序、模式、超时和源码证据 |
 | `trace_signal_gateway` | 追踪 Com Signal、所在 I-PDU 和 ComGwMapping |
 | `inspect_ipdu_group` | 查看 I-PDU Group 成员与 BswM/ComM 直接控制引用 |
+| `trace_autosar_runtime_chain` | 输出跨 CanIf/PduR/Com/LinIf/OS/BswM/CDD 的静态链与反证 |
 | `find_source_context` | 定位 C/H/C++ 完整标识符并返回有限上下文 |
+| `create_investigation_bundle` | 在用户明确目录创建结构化调查证据包 |
+| `record_investigation_evidence` | 分类追加或替换 Trace/Config/源码/反证证据 |
+| `update_investigation_state` | 更新候选假设与开放问题快照 |
+| `get_investigation_summary` | 核对证据数量和有限样本 |
+| `export_investigation_markdown` | 确定性导出 Markdown 报告；当前不提供 PDF 导出 |
 
 ### 调用示例
 
@@ -377,18 +395,19 @@ Debug Agent 使用五部分结构：
 
 - 对外 Channel 统一为 Vector/CANoe 风格的 1-based 编号：`1` 表示 CAN1，`2` 表示 CAN2。
 - Trace Core 直接保留 Vector BLF 对象中的 1-based Channel；调用者不需要自行加减 1。
+- 逻辑网段与数字 Channel 的对应关系只接受用户明确输入，不从名字、顺序、DBC/LDF 或 ARXML 推断。
 - `timestamp`、`start_timestamp` 和 `end_timestamp` 均为 BLF 中的绝对 Unix 时间戳（秒）。
+- BLF 显示时间由 measurement start 与 object header offset 计算，属于 logger clock；未提供采集接口元数据时，采集点和 ECU 内部发送时间均为 `UNKNOWN`。
 - 时间范围过滤的起止边界均包含在查询内。
 
 ## 当前限制
 
-- Trace Session 只在当前 MCP Server 进程内有效；服务重启后需要重新加载 BLF。
-- 当前采用紧凑内存存储，不写额外大型磁盘缓存；日志仍需有足够内存容纳必要字段和原始 payload。
+- Trace Session 只在当前 MCP Server 进程内有效；服务重启后需要重新加载 BLF。当前采用紧凑内存存储并在该进程内复用 BLF 与数据库定义，日志仍需有足够内存容纳必要字段和原始 payload。
 - Trace 的 CAN 信号解码使用 cantools 支持的 DBC/ARXML，LIN 信号解码使用 LDF；Config 以源码完整标识符和有限上下文为主要入口，源码侧不解析宏展开、条件编译、跨语句数据流或完整 AST。
 - Config 的 ARXML 补充查询覆盖标准 Frame/PDU Triggering 和已验证的 DaVinci/MICROSAR ECUC CanIf/PduR/Com 结构，不是完整 AUTOSAR 通用解析器。
 - 时序 Tool 只返回客观统计；没有可靠 expected period 时不会自动判断丢帧。
 - 当前日志输入只支持 BLF；数据库支持 `.dbc`、`.arxml` 与 `.ldf` 文件或目录。
-- Config Workspace 只在当前 Config MCP 进程内有效；文件变化后需要 `force_reload`，服务重启后需要重新加载。
+- Config Workspace ID 只在当前 Config MCP 进程内有效；源码清单、符号、出现位置和行偏移持久化到用户缓存目录的 SQLite。服务重启后仍需重新取得 ID，但未变化文件直接复用基础索引；变化文件按路径、大小、mtime 增量重建。查询使用加载时形成的不可变 generation，不会在 Workspace 生命期内被其他进程的更新替换。
 - 源码与 ARXML 只在完整标识符相同时自动关联；名称近似但无显式引用时不会建立语义关系。Config MCP 只返回配置/实现事实，不自动判断根因。
 - 当前 Debug Agent 按方案 A 由同一 Harness 会话直接调用两个 MCP，尚未使用独立 Subagent 上下文；Tool scope 主要依靠 Skill 规则、Tool Description 与 Eval 控制。
 - Custom Subagent 是未来 Codex 增强方向，当前 Plugin 没有 `.codex/agents/*.toml`、Python DebugAgent 或独立模型运行时。

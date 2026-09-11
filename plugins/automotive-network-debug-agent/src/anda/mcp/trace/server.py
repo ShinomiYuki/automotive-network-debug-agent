@@ -10,6 +10,7 @@
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from anda.health import get_plugin_health
 from anda.trace.session import TraceSessionManager
 
 sessions = TraceSessionManager()
@@ -25,6 +26,12 @@ TRACE_READ_ONLY_ANNOTATIONS = ToolAnnotations(
     idempotent_hint=True,
     open_world_hint=False,
 )
+
+
+@mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
+def get_trace_health() -> dict:
+    """验证 Trace MCP 当前响应、解析后端及插件清单状态。"""
+    return get_plugin_health("trace")
 
 
 @mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
@@ -51,6 +58,12 @@ def get_trace_load_status(trace_id: str, wait_seconds: float = 0) -> dict:
 def get_trace_summary(trace_id: str) -> dict:
     """返回日志时间范围、帧数、Channel、CAN ID 与 CAN FD 摘要。"""
     return sessions.get_summary(trace_id)
+
+
+@mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
+def set_channel_mapping(trace_id: str, mappings: list[dict]) -> dict:
+    """登记用户明确提供的分析仪 Channel、逻辑网段与 ECU Channel 映射。"""
+    return sessions.set_channel_mapping(trace_id, mappings)
 
 
 @mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
@@ -92,6 +105,38 @@ def get_message_timing(
         start_timestamp=start_timestamp,
         end_timestamp=end_timestamp,
         bus_type=bus_type,
+    )
+
+
+@mcp.tool(annotations=TRACE_READ_ONLY_ANNOTATIONS)
+def analyze_routed_signal_timeout(
+    trace_id: str,
+    source_channel: int,
+    source_message: str,
+    target_channels: list[int],
+    target_frame: str,
+    signal_name: str,
+    timeout_value: float | str | bool,
+    configured_timeout_ms: float,
+    source_bus_type: str = "can",
+    target_bus_type: str = "lin",
+    source_database_file: str | None = None,
+    target_database_files: dict[str, str] | None = None,
+) -> dict:
+    """关联源报文停止与各目标 Channel 的 timeout 值首次出现时刻。"""
+    return sessions.analyze_routed_signal_timeout(
+        trace_id=trace_id,
+        source_channel=source_channel,
+        source_message=source_message,
+        target_channels=target_channels,
+        target_frame=target_frame,
+        signal_name=signal_name,
+        timeout_value=timeout_value,
+        configured_timeout_ms=configured_timeout_ms,
+        source_bus_type=source_bus_type,
+        target_bus_type=target_bus_type,
+        source_database_file=source_database_file,
+        target_database_files=target_database_files,
     )
 
 

@@ -78,6 +78,20 @@
       "expected_facts": ["multiple candidates", "request network or message"],
       "plan_note": "候选冲突后停止并要求补充，不按排序选择第一个。",
       "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
+    },
+    {
+      "id": "large_generated_source_batch",
+      "question": "工程路径已提供。批量定位 AmbLigBriAdj、ICC_TDL_24、ZCU_TDL_1、ZCU_TDL_2 在大型 generated source 中的精确位置。",
+      "expected_tool_plan": ["load_config_workspace", "get_config_load_status", "plan_source_search", "search_source_evidence"],
+      "expected_facts": ["bounded local window", "table name", "generated source", "scoped negative result"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context", "read_source_lines"]
+    },
+    {
+      "id": "autosar_runtime_chain",
+      "question": "工程路径和明确 ARXML 已提供。调查 AmbLigBriAdj 从 CAN 到 LIN timeout 的静态跨层链和反证。",
+      "expected_tool_plan": ["load_config_workspace", "get_config_load_status", "trace_autosar_runtime_chain"],
+      "expected_facts": ["producer and consumer", "buffering and processing", "task and callout", "I-PDU Group", "schedule controller", "counter evidence", "file and line evidence"],
+      "forbidden_tools": ["search_config_symbol", "search_source_symbol", "inspect_source_symbol", "trace_message_route", "inspect_pdu", "inspect_communication", "trace_signal_gateway", "inspect_ipdu_group", "find_source_context"]
     }
   ]
 }

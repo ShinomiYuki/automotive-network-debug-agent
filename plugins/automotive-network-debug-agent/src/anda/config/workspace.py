@@ -29,11 +29,14 @@ from anda.config.inspection import (
 )
 from anda.config.models import ArxmlIndex, ConfigObject
 from anda.config.routing import trace_message_route
+from anda.config.runtime_chain import trace_autosar_runtime_chain
 from anda.config.source import SourceIndex
 
 ARXML_EXTENSIONS = {".arxml", ".xml"}
 SOURCE_EXTENSIONS = {".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".inc"}
-SUPPORTED_EXTENSIONS = ARXML_EXTENSIONS | SOURCE_EXTENSIONS
+INVENTORY_EXTENSIONS = {".dbc", ".ldf", ".html", ".htm", ".blf"}
+LOADABLE_EXTENSIONS = ARXML_EXTENSIONS | SOURCE_EXTENSIONS
+SUPPORTED_EXTENSIONS = LOADABLE_EXTENSIONS | INVENTORY_EXTENSIONS
 IGNORED_DIRECTORIES = {
     ".git",
     ".hg",
@@ -44,6 +47,13 @@ IGNORED_DIRECTORIES = {
     ".pytest_cache",
     ".ruff_cache",
     "node_modules",
+    "build",
+    "debug",
+    "release",
+    "obj",
+    "out",
+    "thirdparty",
+    "vendor-doc",
 }
 MAX_SYMBOL_RESULTS = 50
 
@@ -68,9 +78,14 @@ class ConfigLoadTask:
     root_path: str
     arxml_paths: list[str] | None
     force_reload: bool
+    cache_directory: str | None
     status: str = "queued"
     stage: str = "queued"
     elapsed_seconds: float = 0.0
+    total_file_count: int = 0
+    processed_file_count: int = 0
+    reindexed_file_count: int = 0
+    reused_file_count: int = 0
     error: str | None = None
     done: Event = field(default_factory=Event)
 
@@ -92,16 +107,17 @@ class ConfigWorkspaceManager:
         root_path: str,
         arxml_paths: list[str] | None = None,
         force_reload: bool = False,
+        cache_directory: str | None = None,
     ) -> dict:
         """快速返回 workspace_id，并在 daemon 线程中扫描与解析工程。"""
         scope = Path(root_path).expanduser().resolve()
         if not (
             scope.is_dir()
-            or (scope.is_file() and scope.suffix.casefold() in SUPPORTED_EXTENSIONS)
+            or (scope.is_file() and scope.suffix.casefold() in LOADABLE_EXTENSIONS)
         ):
             raise ConfigInputError(f"工程路径不存在，或不是受支持的目录/文件：{scope}")
         explicit_arxml_files = _resolve_explicit_arxml_paths(arxml_paths)
-        root_key = _workspace_cache_key(scope, explicit_arxml_files)
+        root_key = _workspace_cache_key(scope, explicit_arxml_files, cache_directory)
 
         with self._task_lock:
             pending_id = self._pending_keys.get(root_key)
@@ -121,6 +137,7 @@ class ConfigWorkspaceManager:
             str(scope),
             list(arxml_paths) if arxml_paths else None,
             force_reload,
+            cache_directory,
         )
         with self._task_lock:
             existing_pending = self._pending_keys.get(root_key)
@@ -162,10 +179,16 @@ class ConfigWorkspaceManager:
         task.status = "loading"
         task.stage = "scanning_and_indexing_workspace"
         try:
+            def progress(update: dict) -> None:
+                self._update_task_progress(task, update)
+                task.elapsed_seconds = perf_counter() - started
+
             result = self.load_config_workspace(
                 task.root_path,
                 task.arxml_paths,
                 task.force_reload,
+                task.cache_directory,
+                progress_callback=progress,
             )
             built_id = result["workspace_id"]
             with self._load_lock:
@@ -187,33 +210,59 @@ class ConfigWorkspaceManager:
 
     @staticmethod
     def _task_result(task: ConfigLoadTask, reused: bool) -> dict:
+        progress = (
+            min(100.0, round(task.processed_file_count * 100 / task.total_file_count, 2))
+            if task.total_file_count
+            else None
+        )
         return {
             "workspace_id": task.workspace_id,
             "status": task.status,
             "index_ready": task.status == "ready",
             "stage": task.stage,
             "elapsed_seconds": round(task.elapsed_seconds, 3),
+            "total_file_count": task.total_file_count,
+            "processed_file_count": task.processed_file_count,
+            "reindexed_file_count": task.reindexed_file_count,
+            "reused_file_count": task.reused_file_count,
+            "progress_percent": progress,
             "reused": reused,
             "error": task.error,
         }
+
+    @staticmethod
+    def _update_task_progress(task: ConfigLoadTask, update: dict) -> None:
+        task.stage = update.get("stage", task.stage)
+        task.total_file_count = update.get("total_file_count", task.total_file_count)
+        task.processed_file_count = update.get(
+            "processed_file_count", task.processed_file_count
+        )
+        task.reindexed_file_count = update.get(
+            "reindexed_file_count", task.reindexed_file_count
+        )
+        task.reused_file_count = update.get(
+            "reused_file_count", task.reused_file_count
+        )
 
     def load_config_workspace(
         self,
         root_path: str,
         arxml_paths: list[str] | None = None,
         force_reload: bool = False,
+        cache_directory: str | None = None,
+        progress_callback=None,
     ) -> dict:
         scope = Path(root_path).expanduser().resolve()
         if scope.is_dir():
             source_root = scope
             initial_files: list[Path] | None = None
-        elif scope.is_file() and scope.suffix.casefold() in SUPPORTED_EXTENSIONS:
+        elif scope.is_file() and scope.suffix.casefold() in LOADABLE_EXTENSIONS:
             source_root = scope.parent
             initial_files = [scope]
         else:
             raise ConfigInputError(f"工程路径不存在，或不是受支持的目录/文件：{scope}")
         explicit_arxml_files = _resolve_explicit_arxml_paths(arxml_paths)
-        root_key = _workspace_cache_key(scope, explicit_arxml_files)
+        root_key = _workspace_cache_key(scope, explicit_arxml_files, cache_directory)
 
         with self._load_lock:
             existing_id = self._root_to_id.get(root_key)
@@ -225,6 +274,8 @@ class ConfigWorkspaceManager:
         # 扫描数千源码文件和解析大型 ARXML 不能占用状态锁；否则另一个 load Tool
         # 连“返回后台任务 ID”都会被当前索引阻塞。重型构建串行，状态查询保持可用。
         with self._load_slot:
+            if progress_callback:
+                progress_callback({"stage": "building_file_inventory"})
             files = initial_files or _scan_supported_files(scope)
             if arxml_paths:
                 # 显式指定 ARXML 时，以用户选择为准，不混入工程目录中可能属于其他
@@ -232,12 +283,15 @@ class ConfigWorkspaceManager:
                 files = [
                     path
                     for path in files
-                    if path.suffix.casefold() in SOURCE_EXTENSIONS
+                    if path.suffix.casefold() not in ARXML_EXTENSIONS
                 ]
                 files.extend(explicit_arxml_files)
                 files = list(dict.fromkeys(files))
-            if not files:
-                supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+            loadable_files = [
+                path for path in files if path.suffix.casefold() in LOADABLE_EXTENSIONS
+            ]
+            if not loadable_files:
+                supported = ", ".join(sorted(LOADABLE_EXTENSIONS))
                 raise ConfigInputError(
                     f"工程路径中没有支持的配置或源码文件：{scope}；支持：{supported}"
                 )
@@ -247,8 +301,27 @@ class ConfigWorkspaceManager:
             source_files = [
                 path for path in files if path.suffix.casefold() in SOURCE_EXTENSIONS
             ]
+            if progress_callback:
+                progress_callback(
+                    {
+                        "stage": "parsing_arxml",
+                        "total_file_count": len(files),
+                        "processed_file_count": 0,
+                    }
+                )
             arxml_index = parse_arxml_files(arxml_files)
-            source_index = SourceIndex(source_root, source_files)
+            source_index = SourceIndex(
+                source_root,
+                source_files,
+                inventory_files=[
+                    path
+                    for path in files
+                    if path.suffix.casefold() not in ARXML_EXTENSIONS
+                ],
+                cache_dir=cache_directory,
+                scope_identity=str(scope),
+                progress_callback=progress_callback,
+            )
             workspace = ConfigWorkspace(
                 root=scope,
                 files=tuple(files),
@@ -301,6 +374,7 @@ class ConfigWorkspaceManager:
             "signal_gateway_count": len(workspace.arxml.signal_gateways),
             "source_symbol_count": workspace.source.symbol_count,
             "source_occurrence_count": workspace.source.occurrence_count,
+            "project_index": workspace.source.cache_status(),
             "workspace_mode": (
                 "source_plus_arxml"
                 if source_file_count and arxml_file_count
@@ -382,19 +456,99 @@ class ConfigWorkspaceManager:
         return result
 
     def search_source_symbol(
-        self, workspace_id: str, query: str, limit: int = 20
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 20,
+        modules: list[str] | None = None,
     ) -> dict:
         workspace = self._get(workspace_id)
-        result = workspace.source.search_symbols(query, limit)
+        result = workspace.source.search_symbols(query, limit, modules)
         result["workspace_id"] = workspace_id
         return result
+
+    def search_source_evidence(
+        self,
+        workspace_id: str,
+        identifiers: list[str],
+        modules: list[str] | None = None,
+        include_generated: bool = True,
+        include_source: bool = True,
+        limit_per_identifier: int = 20,
+        max_chars_per_match: int = 1000,
+    ) -> dict:
+        """批量返回结构化源码证据；未命中结果同时携带明确搜索范围。"""
+        workspace = self._get(workspace_id)
+        result = workspace.source.search_occurrences(
+            identifiers,
+            modules=modules,
+            include_generated=include_generated,
+            include_source=include_source,
+            limit_per_identifier=limit_per_identifier,
+            max_chars_per_match=max_chars_per_match,
+        )
+        for identifier_result in result["results"]:
+            config_matches = [
+                item
+                for item in _search_arxml(
+                    workspace.arxml, identifier_result["identifier"]
+                )
+                if item["matched_by"] in {"name_exact", "reference_exact"}
+            ]
+            origins = [
+                {
+                    "object_name": item["name"],
+                    "object_type": item.get("object_type"),
+                    "reference_path": item.get("reference_path"),
+                    "evidence": item["evidence"],
+                }
+                for item in config_matches[:20]
+            ]
+            for match in identifier_result["matches"]:
+                if not match["generated_source"]:
+                    continue
+                match["generated_from_arxml"] = origins or None
+                match["generation_origin_status"] = (
+                    "EXACT_IDENTIFIER_MATCH" if origins else "UNKNOWN"
+                )
+        result["workspace_id"] = workspace_id
+        return result
+
+    def plan_source_search(
+        self, workspace_id: str, question_type: str, identifiers: list[str]
+    ) -> dict:
+        workspace = self._get(workspace_id)
+        result = workspace.source.plan_search(question_type, identifiers)
+        result["workspace_id"] = workspace_id
+        return result
+
+    def read_source_lines(
+        self,
+        workspace_id: str,
+        path: str,
+        ranges: list[list[int]],
+        max_chars_per_line: int = 1000,
+    ) -> dict:
+        workspace = self._get(workspace_id)
+        result = workspace.source.read_lines(path, ranges, max_chars_per_line)
+        result["workspace_id"] = workspace_id
+        return result
+
+    def get_project_index_status(self, workspace_id: str) -> dict:
+        workspace = self._get(workspace_id)
+        return {
+            "workspace_id": workspace_id,
+            **workspace.source.cache_status(),
+            "source_symbol_count": workspace.source.symbol_count,
+            "source_occurrence_count": workspace.source.occurrence_count,
+        }
 
     def inspect_source_symbol(
         self,
         workspace_id: str,
         symbol: str,
         limit: int = 20,
-        context_lines: int = 2,
+        context_lines: int = 0,
     ) -> dict:
         """以源码符号为入口，返回源码事实及同名 ARXML 配置证据。"""
         workspace = self._get(workspace_id)
@@ -457,6 +611,22 @@ class ConfigWorkspaceManager:
     def inspect_ipdu_group(self, workspace_id: str, group_name: str) -> dict:
         workspace = self._get(workspace_id)
         result = inspect_ipdu_group(workspace.arxml, workspace.source, group_name)
+        result["workspace_id"] = workspace_id
+        return result
+
+    def trace_autosar_runtime_chain(
+        self,
+        workspace_id: str,
+        signal_name: str,
+        additional_identifiers: list[str] | None = None,
+    ) -> dict:
+        workspace = self._get(workspace_id)
+        result = trace_autosar_runtime_chain(
+            workspace.arxml,
+            workspace.source,
+            signal_name,
+            additional_identifiers,
+        )
         result["workspace_id"] = workspace_id
         return result
 
@@ -528,7 +698,7 @@ class ConfigWorkspaceManager:
         workspace_id: str,
         symbol: str,
         limit: int = 20,
-        context_lines: int = 2,
+        context_lines: int = 0,
     ) -> dict:
         workspace = self._get(workspace_id)
         result = workspace.source.contexts(symbol.strip(), limit, context_lines)
@@ -598,13 +768,23 @@ def _resolve_explicit_arxml_paths(paths: list[str] | None) -> list[Path]:
     return list(dict.fromkeys(result))
 
 
-def _workspace_cache_key(scope: Path, arxml_files: list[Path]) -> str:
+def _workspace_cache_key(
+    scope: Path, arxml_files: list[Path], cache_directory: str | None = None
+) -> str:
     # 显式 ARXML 的输入顺序不改变 Workspace 内容，不应因此重复建立索引。
     parts = [
-        str(scope).casefold(),
-        *(sorted(str(path).casefold() for path in arxml_files)),
+        _path_identity(scope),
+        *(sorted(_path_identity(path) for path in arxml_files)),
+        _path_identity(Path(cache_directory).expanduser().resolve())
+        if cache_directory
+        else "<default-cache>",
     ]
     return "\0".join(parts)
+
+
+def _path_identity(path: Path) -> str:
+    value = str(path)
+    return value.casefold() if os.name == "nt" else value
 
 
 def _search_arxml(index: ArxmlIndex, query: str) -> list[dict]:
