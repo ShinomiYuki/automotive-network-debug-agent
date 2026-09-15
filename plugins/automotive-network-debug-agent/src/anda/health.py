@@ -37,6 +37,34 @@ CONFIG_TOOL_NAMES = [
     "get_investigation_summary",
     "export_investigation_markdown",
 ]
+DYNAMIC_TOOL_NAMES = [
+    "get_dynamic_health",
+    "create_dynamic_session",
+    "get_dynamic_status",
+    "close_dynamic_session",
+    "compile_capl",
+    "control_measurement",
+    "control_offline_animation",
+    "wait_runtime_event",
+    "observe_bus_window",
+    "get_signal",
+    "get_variable",
+    "read_write_window",
+    "get_bus_statistics",
+    "inspect_network_model",
+    "get_debug_snapshot",
+    "set_signal",
+    "set_variable",
+    "call_capl_function",
+    "transmit_can_frame",
+    "send_diagnostic_request",
+    "configure_replay",
+    "control_replay",
+    "manage_logging",
+    "list_tests",
+    "start_test",
+    "get_test_result",
+]
 
 
 def get_plugin_health(current_mcp: str) -> dict:
@@ -58,6 +86,13 @@ def get_plugin_health(current_mcp: str) -> dict:
         if "automotive-config" in configured_servers
         else "unavailable"
     )
+    dynamic_status = (
+        "available"
+        if current == "dynamic"
+        else "configured_not_runtime_verified"
+        if "automotive-dynamic" in configured_servers
+        else "unavailable"
+    )
     return {
         "current_mcp": current,
         "trace_mcp": {
@@ -69,6 +104,11 @@ def get_plugin_health(current_mcp: str) -> dict:
             "status": config_status,
             "configured": "automotive-config" in configured_servers,
             "core_tools": CONFIG_TOOL_NAMES,
+        },
+        "dynamic_mcp": {
+            "status": dynamic_status,
+            "configured": "automotive-dynamic" in configured_servers,
+            "core_tools": DYNAMIC_TOOL_NAMES,
         },
         "blf_parser_backend": _module_status("vblf"),
         "dbc_decoder": _module_status("cantools"),

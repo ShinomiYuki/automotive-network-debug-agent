@@ -25,6 +25,19 @@
       "startup_timeout_sec": 20,
       "tool_timeout_sec": 120,
       "default_tools_approval_mode": "writes"
+    },
+    "automotive-dynamic": {
+      "cwd": ".",
+      "command": "pwsh",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        "./scripts/run_dynamic_mcp.ps1"
+      ],
+      "startup_timeout_sec": 20,
+      "tool_timeout_sec": 180,
+      "default_tools_approval_mode": "writes"
     }
   }
 }

@@ -1,7 +1,7 @@
 <#
 文件用途：
-- 为同一插件内的 Trace/Config MCP 复用 Python 与 Conda 解释器选择逻辑。
-- 只接受固定的两个模块名，不执行调用方提供的任意 Python 表达式。
+- 为同一插件内的 Trace/Config/Dynamic MCP 复用 Python 与 Conda 解释器选择逻辑。
+- 只接受固定的三个模块名，不执行调用方提供的任意 Python 表达式。
 
 解释器选择顺序：
 1. ANDA_PYTHON 环境变量；
@@ -13,7 +13,11 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('anda.mcp.trace.server', 'anda.mcp.config.server')]
+    [ValidateSet(
+        'anda.mcp.trace.server',
+        'anda.mcp.config.server',
+        'anda.mcp.dynamic.server'
+    )]
     [string]$Module
 )
 

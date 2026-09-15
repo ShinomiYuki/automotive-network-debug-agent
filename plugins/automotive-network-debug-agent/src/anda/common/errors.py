@@ -58,3 +58,31 @@ class ConfigConflictError(ConfigError):
 
 class InvestigationError(AndaError):
     """结构化调查证据包路径、内容或写入操作无效。"""
+
+
+class DynamicError(AndaError):
+    """Dynamic Verification Core 基础异常。"""
+
+
+class DynamicInputError(DynamicError):
+    """Dynamic Session 或 Tool 输入无效。"""
+
+
+class DynamicSessionNotFoundError(DynamicError):
+    """dynamic_session_id 不存在或 MCP 重启后已失效。"""
+
+
+class DynamicStateError(DynamicError):
+    """当前 Dynamic Session 状态不允许执行请求。"""
+
+
+class DynamicPolicyError(DynamicError):
+    """Runtime Policy 未授权请求的副作用。"""
+
+
+class DynamicBackendError(DynamicError):
+    """CANoe Backend 执行失败。"""
+
+
+class DynamicUnsupportedError(DynamicError):
+    """当前 CANoe、许可证或 Configuration 不支持请求能力。"""

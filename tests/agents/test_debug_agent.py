@@ -205,7 +205,7 @@ def test_debug_eval_encodes_conflict_and_non_inference_boundaries():
         assert "channel_mapping" in cases[case_id]["provided_inputs"]
 
 
-def test_plugin_keeps_one_package_two_mcps_and_no_independent_agent_runtime():
+def test_plugin_keeps_one_package_three_mcps_and_no_independent_agent_runtime():
     plugin = json.loads(PLUGIN_MANIFEST_PATH.read_text(encoding="utf-8"))
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     mcp_manifest = json.loads(MCP_MANIFEST_PATH.read_text(encoding="utf-8"))
@@ -225,6 +225,7 @@ def test_plugin_keeps_one_package_two_mcps_and_no_independent_agent_runtime():
     assert set(mcp_manifest["mcpServers"]) == {
         "automotive-trace",
         "automotive-config",
+        "automotive-dynamic",
     }
     assert "debug analysis" in plugin["interface"]["longDescription"].casefold()
     assert any(

@@ -72,6 +72,7 @@ def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
     marketplace = json.loads(MARKETPLACE_PATH.read_text(encoding="utf-8"))
     trace_server = mcp_manifest["mcpServers"]["automotive-trace"]
     config_server = mcp_manifest["mcpServers"]["automotive-config"]
+    dynamic_server = mcp_manifest["mcpServers"]["automotive-dynamic"]
     project_text = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (
@@ -96,14 +97,18 @@ def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
     assert set(mcp_manifest["mcpServers"]) == {
         "automotive-trace",
         "automotive-config",
+        "automotive-dynamic",
     }
-    for server in (trace_server, config_server):
+    for server in (trace_server, config_server, dynamic_server):
         assert server["command"] == "pwsh"
         assert server["cwd"] == "."
         assert server["default_tools_approval_mode"] == "writes"
-        assert server["tool_timeout_sec"] == 120
+    assert trace_server["tool_timeout_sec"] == 120
+    assert config_server["tool_timeout_sec"] == 120
+    assert dynamic_server["tool_timeout_sec"] == 180
     assert trace_server["args"][-1] == "./scripts/run_trace_mcp.ps1"
     assert config_server["args"][-1] == "./scripts/run_config_mcp.ps1"
+    assert dynamic_server["args"][-1] == "./scripts/run_dynamic_mcp.ps1"
     assert "openai_api_key" not in project_text.casefold()
     assert not (ROOT / ".codex" / "config.toml").exists()
 
