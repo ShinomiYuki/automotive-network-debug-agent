@@ -21,6 +21,7 @@ from anda.dynamic.models import (
     DatabaseSpec,
     DynamicMode,
     DynamicSession,
+    InstanceMode,
     RuntimeCapability,
 )
 from anda.dynamic.policy import normalize_runtime_capabilities, require_capability
@@ -76,18 +77,41 @@ class DynamicSessionManager:
         database_mappings: list[dict[str, Any]] | None = None,
         configuration_path: str | None = None,
         mode: str = "auto",
+        instance_mode: str = "managed",
+        license_confirmed: bool = False,
         runtime_policy: list[str] | None = None,
         visible: bool = False,
         raw_frame_capl_function: str = "ANDA_TransmitCanFrame",
     ) -> dict[str, Any]:
-        resolved_mode = _resolve_mode(mode, configuration_path)
+        if not license_confirmed:
+            raise DynamicInputError(
+                "启动或附着 CANoe 前必须由用户明确确认有效许可证；"
+                "确认后传入 license_confirmed=true"
+            )
+        resolved_instance_mode = _resolve_instance_mode(instance_mode)
+        resolved_mode = _resolve_mode(mode, configuration_path, resolved_instance_mode)
         blf = _optional_file(blf_path, "BLF")
         configuration = _optional_file(configuration_path, "CANoe Configuration")
+        if (
+            resolved_instance_mode is InstanceMode.ATTACHED
+            and configuration is not None
+        ):
+            raise DynamicInputError(
+                "attached 模式不接受 configuration_path，避免替换用户当前 cfg"
+            )
         if configuration is not None and configuration.suffix.casefold() != ".cfg":
             raise DynamicInputError("configuration_path 必须指向 CANoe .cfg 文件")
-        if blf is None and configuration is None:
+        if (
+            resolved_instance_mode is InstanceMode.MANAGED
+            and blf is None
+            and configuration is None
+        ):
             raise DynamicInputError("至少需要提供 blf_path 或 configuration_path")
-        if resolved_mode is DynamicMode.ONLINE and configuration is None:
+        if (
+            resolved_instance_mode is InstanceMode.MANAGED
+            and resolved_mode is DynamicMode.ONLINE
+            and configuration is None
+        ):
             raise DynamicInputError("online Session 必须提供明确的 CANoe .cfg")
 
         database_files = tuple(
@@ -98,7 +122,11 @@ class DynamicSessionManager:
         session_id = str(uuid4())
         temp_directory = self._temp_root / session_id
 
-        origin = ConfigurationOrigin.TEMPORARY_CONFIGURATION
+        origin = (
+            ConfigurationOrigin.ATTACHED_CONFIGURATION
+            if resolved_instance_mode is InstanceMode.ATTACHED
+            else ConfigurationOrigin.TEMPORARY_CONFIGURATION
+        )
         original_digest = _file_digest(configuration) if configuration else None
         shadow = None
         with self._lock:
@@ -150,10 +178,15 @@ class DynamicSessionManager:
                 "initialize",
                 {
                     "mode": resolved_mode.value,
+                    "instance_mode": resolved_instance_mode.value,
                     "configuration_origin": origin.value,
                     "configuration_path": str(shadow) if shadow else None,
                     "blf_path": str(blf) if blf else None,
-                    "databases": [item.to_dict() for item in database_specs],
+                    "databases": (
+                        [item.to_dict() for item in database_specs]
+                        if resolved_instance_mode is InstanceMode.MANAGED
+                        else []
+                    ),
                     "temp_directory": str(temp_directory),
                     "visible": visible,
                     "raw_frame_capl_function": raw_frame_capl_function,
@@ -170,6 +203,8 @@ class DynamicSessionManager:
                     worker.shutdown()
             _remove_shadow(shadow)
             _remove_directory(temp_directory)
+            if trace_id is not None:
+                self._trace.release_trace(trace_id)
             self._clear_active(session_id)
             raise
 
@@ -177,6 +212,18 @@ class DynamicSessionManager:
             dynamic_session_id=session_id,
             mode=resolved_mode,
             configuration_origin=origin,
+            instance_mode=resolved_instance_mode,
+            owns_canoe_process=bool(
+                backend_status.get(
+                    "owns_canoe_process",
+                    resolved_instance_mode is InstanceMode.MANAGED,
+                )
+            ),
+            can_quit=bool(
+                backend_status.get(
+                    "can_quit", resolved_instance_mode is InstanceMode.MANAGED
+                )
+            ),
             runtime_capabilities=capabilities,
             worker=worker,
             temp_directory=temp_directory,
@@ -219,6 +266,11 @@ class DynamicSessionManager:
             worker_stopped = session.worker.shutdown(timeout=15)
         else:
             worker_stopped = True
+        trace_release = (
+            self._trace.release_trace(session.trace_id)
+            if session.trace_id is not None
+            else None
+        )
         if not worker_stopped:
             cleanup_errors.append(
                 {"operation": "worker_shutdown", "error": "STA 线程未在期限内退出"}
@@ -231,6 +283,7 @@ class DynamicSessionManager:
                 "shadow_configuration_removed": False,
                 "temporary_directory_removed": False,
                 "cleanup_pending": True,
+                "trace_release": trace_release,
                 "cleanup_errors": cleanup_errors,
             }
 
@@ -266,6 +319,7 @@ class DynamicSessionManager:
                 or not session.shadow_configuration.exists()
             ),
             "temporary_directory_removed": temporary_directory_removed,
+            "trace_release": trace_release,
             "cleanup_errors": cleanup_errors,
         }
 
@@ -315,7 +369,9 @@ class DynamicSessionManager:
             action.strip().casefold(),
             animation_delay_ms,
         )
-        _track_operation(session, "offline_animation", result.get("animation") != "stopped")
+        _track_operation(
+            session, "offline_animation", result.get("animation") != "stopped"
+        )
         return result
 
     def wait_runtime_event(
@@ -456,10 +512,8 @@ class DynamicSessionManager:
     ) -> dict[str, Any]:
         session = self._authorized(dynamic_session_id, RuntimeCapability.OBSERVATION)
         normalized_kind = kind.strip().casefold()
-        if normalized_kind not in {"database", "node", "message", "signal", "symbol"}:
-            raise DynamicInputError(
-                "kind 仅支持 database、node、message、signal、symbol"
-            )
+        if normalized_kind not in {"database", "node", "message", "signal"}:
+            raise DynamicInputError("kind 仅支持 database、node、message、signal")
         if not 1 <= limit:
             raise DynamicInputError("limit 必须大于等于 1")
         if normalized_kind in {"message", "signal"} and session.trace_id is not None:
@@ -492,7 +546,10 @@ class DynamicSessionManager:
         write_line_limit: int = 50,
     ) -> dict[str, Any]:
         session = self._authorized(dynamic_session_id, RuntimeCapability.OBSERVATION)
-        if len(signals or []) > MAX_SNAPSHOT_ITEMS or len(variables or []) > MAX_SNAPSHOT_ITEMS:
+        if (
+            len(signals or []) > MAX_SNAPSHOT_ITEMS
+            or len(variables or []) > MAX_SNAPSHOT_ITEMS
+        ):
             raise DynamicInputError("快照最多读取 10 个 Signal 和 10 个 Variable")
         return session.worker.call(
             "get_debug_snapshot", signals or [], variables or [], write_line_limit
@@ -599,7 +656,9 @@ class DynamicSessionManager:
         result = session.worker.call(
             "control_replay", block_name, action.strip().casefold()
         )
-        _track_operation(session, f"replay:{block_name}", result.get("state") == "running")
+        _track_operation(
+            session, f"replay:{block_name}", result.get("state") == "running"
+        )
         return result
 
     def manage_logging(
@@ -621,9 +680,7 @@ class DynamicSessionManager:
             _track_operation(session, "logging", normalized_action == "start")
         return result
 
-    def list_tests(
-        self, dynamic_session_id: str, limit: int = 50
-    ) -> dict[str, Any]:
+    def list_tests(self, dynamic_session_id: str, limit: int = 50) -> dict[str, Any]:
         session = self._authorized(dynamic_session_id, RuntimeCapability.OBSERVATION)
         if limit < 1:
             raise DynamicInputError("limit 必须大于等于 1")
@@ -643,7 +700,9 @@ class DynamicSessionManager:
         session = self._authorized(dynamic_session_id, RuntimeCapability.OBSERVATION)
         if limit < 1:
             raise DynamicInputError("limit 必须大于等于 1")
-        return session.worker.call("get_test_result", name, min(limit, MAX_TEST_RESULTS))
+        return session.worker.call(
+            "get_test_result", name, min(limit, MAX_TEST_RESULTS)
+        )
 
     def _get(
         self, dynamic_session_id: str, allow_closed: bool = False
@@ -678,6 +737,9 @@ class DynamicSessionManager:
             "created": created,
             "closed": session.closed,
             "mode": session.mode.value,
+            "instance_mode": session.instance_mode.value,
+            "owns_canoe_process": session.owns_canoe_process,
+            "can_quit": session.can_quit,
             "configuration_origin": session.configuration_origin.value,
             "configuration": (
                 str(session.original_configuration)
@@ -685,7 +747,9 @@ class DynamicSessionManager:
                 else None
             ),
             "shadow_configuration": (
-                str(session.shadow_configuration) if session.shadow_configuration else None
+                str(session.shadow_configuration)
+                if session.shadow_configuration
+                else None
             ),
             "blf_path": str(session.blf_path) if session.blf_path else None,
             "database_count": len(session.database_specs),
@@ -720,14 +784,33 @@ def _optional_file(path_value: str | None, label: str) -> Path | None:
     return _required_file(path_value, label) if path_value else None
 
 
-def _resolve_mode(mode: str, configuration_path: str | None) -> DynamicMode:
+def _resolve_instance_mode(value: str) -> InstanceMode:
+    try:
+        return InstanceMode(value.strip().casefold())
+    except ValueError as exc:
+        raise DynamicInputError("instance_mode 仅支持 managed 或 attached") from exc
+
+
+def _resolve_mode(
+    mode: str,
+    configuration_path: str | None,
+    instance_mode: InstanceMode,
+) -> DynamicMode:
     try:
         requested = DynamicMode(mode.strip().casefold())
     except ValueError as exc:
         raise DynamicInputError("mode 仅支持 auto、offline、online") from exc
+    if requested is DynamicMode.AUTO and instance_mode is InstanceMode.ATTACHED:
+        raise DynamicInputError(
+            "attached 模式必须明确指定 mode=offline 或 mode=online，不能猜测"
+        )
     if requested is DynamicMode.AUTO:
         return DynamicMode.OFFLINE
-    if requested is DynamicMode.ONLINE and not configuration_path:
+    if (
+        requested is DynamicMode.ONLINE
+        and not configuration_path
+        and instance_mode is InstanceMode.MANAGED
+    ):
         raise DynamicInputError("online Session 必须提供 configuration_path")
     return requested
 
@@ -755,7 +838,9 @@ def _database_specs(
         if not network_name:
             raise DynamicInputError("database network_name 不能为空")
         specs.append(DatabaseSpec(path, bus, channel, network_name))
-    unknown = sorted(set(mapping_by_path) - {str(path).casefold() for path in database_files})
+    unknown = sorted(
+        set(mapping_by_path) - {str(path).casefold() for path in database_files}
+    )
     if unknown:
         raise DynamicInputError("database_mappings 包含未列入 database_paths 的路径")
     return tuple(specs)
@@ -773,7 +858,10 @@ def _verify_original(session: DynamicSession) -> bool:
     if session.original_configuration is None:
         return True
     try:
-        return _file_digest(session.original_configuration) == session.original_configuration_digest
+        return (
+            _file_digest(session.original_configuration)
+            == session.original_configuration_digest
+        )
     except OSError:
         return False
 

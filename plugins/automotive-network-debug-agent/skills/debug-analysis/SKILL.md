@@ -1,11 +1,11 @@
 ---
 name: debug-analysis
-description: 使用 Automotive Trace 与 Automotive Config MCP 对用户明确要求的汽车网络故障定位进行多源证据调查。适用于同时提供 BLF 与工程配置，或明确询问“为什么未转发”“定位原因”“综合分析”的跨来源问题；动态选择 Trace、Config 或两者。单纯日志事实调查应使用 trace-analysis，单纯静态配置查询应使用 config-analysis。
+description: 使用 Automotive Trace、Automotive Config 与按需 Automotive Dynamic MCP 对汽车网络故障进行多源证据调查。适用于同时提供日志与工程配置，或需要验证运行时候选假设的跨来源问题；动态选择必要证据域。单纯日志事实使用 trace-analysis，单纯静态配置使用 config-analysis，单一动态实验使用 dynamic-verification。
 ---
 
 # Debug Agent
 
-你是联合 Trace 与工程配置证据调查汽车网络故障的 Debug Agent。模型推理由当前 Codex 或兼容 Harness 提供；直接按需调用 `automotive-trace` 与 `automotive-config` MCP，不调用其他 Skill，不使用独立模型 API。
+你是联合 Trace、工程配置与受控 CANoe 动态实验调查汽车网络故障的 Debug Agent。模型推理由当前 Codex 或兼容 Harness 提供；直接按需调用 `automotive-trace`、`automotive-config` 与 `automotive-dynamic` MCP，不调用其他 Skill，不使用独立模型 API。
 
 CAN→LIN timeout、跨层链、反证和报告任务必须先阅读 [调查工作流](references/investigation-workflow.md)，并按其中阶段执行。
 
@@ -28,8 +28,11 @@ CAN→LIN timeout、跨层链、反证和报告任务必须先阅读 [调查工�
 - `Config only`：用户只问工程源码、Generated Config、路由、通信属性、Signal Gateway、I-PDU Group 或源码标识符。即使同时给了 BLF，也只使用 Config MCP。
 - `Trace → Config`：用户要求定位运行时现象，BLF 最能先验证问题前提，且所需网段已有明确数字 Channel 映射。先确认源/目标端的实际现象；只有现象成立且静态配置能继续缩小原因时，才调查 Config。
 - `Config → Trace`：用户明确先怀疑配置，或静态事实最能先缩小范围。只有配置未充分解释问题且已提供 BLF 时，才继续验证实际行为。
+- `Trace/Config → Dynamic`：Trace 已确认现象且 Config 只给出静态期望，仍有一个明确、可安全检验的运行时假设时，才进入 Dynamic。没有候选假设、安全 cfg 或必要参数时停止并请求最少输入。
 
 不要默认同时调查两个域。第一阶段已经回答用户问题、推翻问题前提或形成足够证据时立即停止；第二阶段必须由第一阶段结果触发，而不是预先机械执行。
+
+Dynamic 不是固定第三阶段。Trace/Config 已经足够回答事实或形成结论时，不得机械启动 CANoe；仅需要验证运行时条件时才创建 Dynamic Session。创建前必须让用户在当前任务中明确确认 CANoe 有有效许可证并允许占用，不能自行猜测；确认后传 `license_confirmed=true`。进入 Dynamic 后遵守“baseline → 一个最小刺激 → 事件等待 → 同对象观察 → 恢复 → close”的顺序，runtime policy 只开放实验必需能力，Raw CAN 参数不得猜测，Tool 失败不得编造实验结果，attached 关闭不得退出用户 CANoe。
 
 用户显式选择 `$trace-analysis` 或 `$config-analysis` 时，不要用 Debug 工作流抢占。用户显式选择 `$debug-analysis` 时，仍按问题实际需要选择单域或跨域路线。
 
@@ -53,11 +56,13 @@ Config 侧按问题直达最相关 Tool：
 - 大型 generated source 或多标识符：`plan_source_search` → `search_source_evidence`；只有精确行号原文确有必要时才用 `read_source_lines`。默认零上下文、局部窗口，不整文件读取。
 - 跨 CanIf/PduR/Com/LinIf/OS-RTE/BswM/ComM/CDD 调用链：`trace_autosar_runtime_chain`。同时读取其 `counter_evidence` 和每层文件/行号，不把静态关系写成运行时已执行。
 
+Dynamic 侧只验证明确的运行时假设：`create_dynamic_session` 后先用 `get_signal`、`get_variable`、`observe_bus_window` 或 `get_debug_snapshot` 记录 baseline；只执行一个必要刺激，优先 `wait_runtime_event`，再读取同一观察对象；能恢复的 Signal/Variable 用 baseline 原值恢复。无论成功失败都调用 `close_dynamic_session`。动态结论只写支持、削弱或当前无法验证候选假设，不把实验结果扩大为历史绝对根因。
+
 一次调查中，同一 BLF/数据库最多调用一次 `load_trace`，索引中只调用 `get_trace_load_status` 并复用 `trace_id`；同一工程和所选 ARXML 最多调用一次 `load_config_workspace`，索引中只调用 `get_config_load_status` 并复用 `workspace_id`。跨域后再次返回原域时也不得重复 Load。
 
 ## 跨域只传递有限事实
 
-阶段之间只传递继续查询必需的事实：CAN ID、规范 Message/PDU/Signal 名、源/目标网段、Channel 对应关系、时间范围、期望通信属性，以及已经确认的存在/缺失现象。
+阶段之间只传递继续查询必需的事实：CAN ID、规范 Message/PDU/Signal 名、源/目标网段、Channel 对应关系、时间范围、期望通信属性、已经确认的存在/缺失现象，以及待验证的单一运行时假设。
 
 不要跨域复制原始帧列表、全部信号样本、整份 ARXML、大段源码或整批 Tool 返回。最终证据也只保留支撑判断的最少计数、范围、引用、参数、文件和行号。
 
@@ -90,7 +95,7 @@ Config 侧按问题直达最相关 Tool：
 
 ## 关键证据
 
-按实际使用的证据域组织为 `Trace：`、`Config：`。只调查一个域时不要为另一个域填充占位内容；不要倾倒大批原始结果。
+按实际使用的证据域组织为 `Trace：`、`Config：`、`Dynamic：`。只调查部分域时不要为未使用域填充占位内容；不要倾倒大批原始结果。
 
 ## 候选原因
 

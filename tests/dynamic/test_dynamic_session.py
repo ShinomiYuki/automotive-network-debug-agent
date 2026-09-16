@@ -8,8 +8,13 @@ from typing import Any, ClassVar
 
 import pytest
 
-from anda.common.errors import DynamicInputError, DynamicPolicyError, DynamicStateError
-from anda.dynamic.pycanoe import _bounded_value
+from anda.common.errors import (
+    DynamicInputError,
+    DynamicPolicyError,
+    DynamicStateError,
+    TraceNotFoundError,
+)
+from anda.dynamic.pycanoe import PyCanoeBackend, _bounded_value
 from anda.dynamic.session import DynamicSessionManager
 
 
@@ -39,6 +44,13 @@ class FakeBackend:
     def initialize(self, spec: dict[str, Any]) -> dict[str, Any]:
         self._call("initialize", spec)
         self.spec = spec
+        self.status.update(
+            {
+                "instance_mode": spec["instance_mode"],
+                "owns_canoe_process": spec["instance_mode"] == "managed",
+                "can_quit": spec["instance_mode"] == "managed",
+            }
+        )
         return dict(self.status)
 
     def get_status(self) -> dict[str, Any]:
@@ -75,6 +87,15 @@ def test_health_does_not_create_backend(tmp_path: Path):
     assert FakeBackend.instances == []
 
 
+def test_license_must_be_explicitly_confirmed_before_backend_creation(tmp_path: Path):
+    manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
+
+    with pytest.raises(DynamicInputError, match="license_confirmed=true"):
+        manager.create_dynamic_session(instance_mode="attached", mode="online")
+
+    assert FakeBackend.instances == []
+
+
 def test_arbitrary_backend_values_are_bounded():
     value = [{"text": "x" * 3_000, "values": list(range(200))}] * 150
 
@@ -85,18 +106,88 @@ def test_arbitrary_backend_values_are_bounded():
     assert len(bounded[0]["values"]) == 100
 
 
+def test_attached_backend_close_releases_reference_without_quit(monkeypatch):
+    class Application:
+        def __init__(self) -> None:
+            self.released = False
+
+        def _release_event_sinks(self) -> None:
+            self.released = True
+
+    class Canoe:
+        def __init__(self) -> None:
+            self.application = Application()
+            self.quit_called = False
+
+        def get_measurement_running_status(self) -> bool:
+            return False
+
+        def quit(self, timeout: int) -> bool:
+            self.quit_called = True
+            return True
+
+        def _reset_application(self) -> None:
+            self.application = None
+
+    backend = PyCanoeBackend()
+    canoe = Canoe()
+    application = canoe.application
+    backend._canoe = canoe
+    backend._instance_mode = "attached"
+    backend._can_quit = False
+    monkeypatch.setattr(backend, "_release_process_resources", list)
+
+    result = backend.close()
+
+    assert result["closed"] is True
+    assert application.released is True
+    assert canoe.quit_called is False
+
+
+def test_cfg_only_network_model_reads_messages_and_signals_from_loaded_database(
+    tmp_path: Path,
+):
+    database = tmp_path / "model.dbc"
+    database.write_text(
+        'VERSION ""\nNS_ :\nBS_:\nBU_: ECU\n'
+        "BO_ 291 DemoMessage: 8 ECU\n"
+        ' SG_ DemoSignal : 0|8@1+ (1,0) [0|255] "" ECU\n',
+        encoding="ascii",
+    )
+
+    class Canoe:
+        @staticmethod
+        def get_simulation_database_paths() -> list[str]:
+            return [str(database)]
+
+    backend = PyCanoeBackend()
+    backend._canoe = Canoe()
+
+    messages = backend.inspect_network_model("message", "Demo", "CAN", 10)
+    signals = backend.inspect_network_model("signal", "DemoSignal", "CAN", 10)
+
+    assert messages["items"][0]["frame_id"] == 0x123
+    assert messages["items"][0]["message"] == "DemoMessage"
+    assert signals["items"][0]["signal"] == "DemoSignal"
+
+
 def test_shadow_configuration_is_used_and_original_is_preserved(tmp_path: Path):
     configuration = tmp_path / "project.cfg"
     configuration.write_bytes(b"original configuration")
     manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
 
-    created = manager.create_dynamic_session(configuration_path=str(configuration))
+    created = manager.create_dynamic_session(
+        configuration_path=str(configuration), license_confirmed=True
+    )
     session_id = created["dynamic_session_id"]
     backend = FakeBackend.instances[0]
     shadow = Path(backend.spec["configuration_path"])
 
     assert created["mode"] == "offline"
     assert created["configuration_origin"] == "shadow_copy"
+    assert created["instance_mode"] == "managed"
+    assert created["owns_canoe_process"] is True
+    assert created["can_quit"] is True
     assert shadow.parent == configuration.parent
     assert shadow != configuration
     assert shadow.read_bytes() == configuration.read_bytes()
@@ -108,18 +199,52 @@ def test_shadow_configuration_is_used_and_original_is_preserved(tmp_path: Path):
     assert configuration.read_bytes() == b"original configuration"
 
 
+def test_attached_session_never_replaces_configuration_or_claims_quit(tmp_path: Path):
+    manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
+
+    created = manager.create_dynamic_session(
+        instance_mode="attached", mode="online", license_confirmed=True
+    )
+
+    assert created["configuration_origin"] == "attached_configuration"
+    assert created["configuration"] is None
+    assert created["shadow_configuration"] is None
+    assert created["owns_canoe_process"] is False
+    assert created["can_quit"] is False
+    assert FakeBackend.instances[0].spec["configuration_path"] is None
+    manager.close_dynamic_session(created["dynamic_session_id"])
+
+
+def test_attached_requires_explicit_mode_and_rejects_cfg(tmp_path: Path):
+    configuration = tmp_path / "user.cfg"
+    configuration.write_text("cfg", encoding="utf-8")
+    manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
+
+    with pytest.raises(DynamicInputError, match="必须明确指定"):
+        manager.create_dynamic_session(instance_mode="attached", license_confirmed=True)
+    with pytest.raises(DynamicInputError, match="不接受 configuration_path"):
+        manager.create_dynamic_session(
+            instance_mode="attached",
+            mode="online",
+            configuration_path=str(configuration),
+            license_confirmed=True,
+        )
+
+
 def test_default_policy_blocks_active_mutation_and_only_one_session(tmp_path: Path):
     configuration = tmp_path / "project.cfg"
     configuration.write_text("cfg", encoding="utf-8")
     manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
-    created = manager.create_dynamic_session(configuration_path=str(configuration))
+    created = manager.create_dynamic_session(
+        configuration_path=str(configuration), license_confirmed=True
+    )
 
     with pytest.raises(DynamicPolicyError, match="frame_injection"):
-        manager.transmit_can_frame(
-            created["dynamic_session_id"], 1, 0x123, "01 02"
-        )
+        manager.transmit_can_frame(created["dynamic_session_id"], 1, 0x123, "01 02")
     with pytest.raises(DynamicStateError, match="已有活动 Session"):
-        manager.create_dynamic_session(configuration_path=str(configuration))
+        manager.create_dynamic_session(
+            configuration_path=str(configuration), license_confirmed=True
+        )
 
     manager.close_dynamic_session(created["dynamic_session_id"])
 
@@ -136,14 +261,16 @@ def test_failed_creation_releases_session_reservation(tmp_path: Path):
 
     configuration = tmp_path / "project.cfg"
     configuration.write_text("cfg", encoding="utf-8")
-    manager = DynamicSessionManager(
-        FailOnceBackend, temp_root=tmp_path / "sessions"
-    )
+    manager = DynamicSessionManager(FailOnceBackend, temp_root=tmp_path / "sessions")
 
     with pytest.raises(RuntimeError, match="intentional initialize failure"):
-        manager.create_dynamic_session(configuration_path=str(configuration))
+        manager.create_dynamic_session(
+            configuration_path=str(configuration), license_confirmed=True
+        )
 
-    created = manager.create_dynamic_session(configuration_path=str(configuration))
+    created = manager.create_dynamic_session(
+        configuration_path=str(configuration), license_confirmed=True
+    )
     assert created["created"] is True
     manager.close_dynamic_session(created["dynamic_session_id"])
 
@@ -153,7 +280,9 @@ def test_backend_calls_stay_on_one_worker_thread(tmp_path: Path):
     configuration.write_text("cfg", encoding="utf-8")
     manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
     created = manager.create_dynamic_session(
-        configuration_path=str(configuration), mode="online"
+        configuration_path=str(configuration),
+        mode="online",
+        license_confirmed=True,
     )
     session_id = created["dynamic_session_id"]
 
@@ -171,6 +300,7 @@ def test_raw_frame_limits_are_enforced_before_backend_call(tmp_path: Path):
     manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
     created = manager.create_dynamic_session(
         configuration_path=str(configuration),
+        license_confirmed=True,
         runtime_policy=["observation", "frame_injection"],
     )
     session_id = created["dynamic_session_id"]
@@ -178,9 +308,7 @@ def test_raw_frame_limits_are_enforced_before_backend_call(tmp_path: Path):
     with pytest.raises(DynamicInputError, match="最多 8 字节"):
         manager.transmit_can_frame(session_id, 1, 0x123, "00" * 9)
     with pytest.raises(DynamicInputError, match="至少为 10"):
-        manager.transmit_can_frame(
-            session_id, 1, 0x123, "00", count=2, interval_ms=1
-        )
+        manager.transmit_can_frame(session_id, 1, 0x123, "00", count=2, interval_ms=1)
     with pytest.raises(DynamicInputError, match="不能超过 10 秒"):
         manager.transmit_can_frame(
             session_id, 1, 0x123, "00", count=100, interval_ms=102
@@ -205,7 +333,9 @@ def test_observe_bus_window_reuses_trace_core(trace_files, tmp_path: Path):
     blf, database = trace_files
     manager = DynamicSessionManager(FakeBackend, temp_root=tmp_path / "sessions")
     created = manager.create_dynamic_session(
-        blf_path=str(blf), database_paths=[str(database)]
+        blf_path=str(blf),
+        database_paths=[str(database)],
+        license_confirmed=True,
     )
     session_id = created["dynamic_session_id"]
     trace_id = created["trace"]["trace_id"]
@@ -234,3 +364,5 @@ def test_observe_bus_window_reuses_trace_core(trace_files, tmp_path: Path):
         "payload",
     }
     manager.close_dynamic_session(session_id)
+    with pytest.raises(TraceNotFoundError, match="未知 trace_id"):
+        manager._trace.get_load_status(trace_id)

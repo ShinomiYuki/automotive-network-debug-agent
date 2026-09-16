@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import platform
+import subprocess
 import time
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -16,6 +18,7 @@ from anda.common.errors import (
     DynamicStateError,
     DynamicUnsupportedError,
 )
+from anda.trace.dbc import DATABASE_EXTENSIONS, NetworkDatabase
 
 MAX_WRITE_LINES = 200
 MAX_WRITE_CHARS = 16_000
@@ -61,7 +64,8 @@ def _bounded_text(text: str | None, line_limit: int, char_limit: int) -> dict[st
         "returned_line_count": len(tail.splitlines()),
         "line_limit_applied": applied_lines,
         "char_limit_applied": applied_chars,
-        "truncated": len(lines) > applied_lines or len("\n".join(lines[-applied_lines:])) > applied_chars,
+        "truncated": len(lines) > applied_lines
+        or len("\n".join(lines[-applied_lines:])) > applied_chars,
     }
 
 
@@ -83,8 +87,7 @@ def _bounded_value(value: Any, depth: int = 0) -> Any:
         value = sorted(value, key=repr)
     if isinstance(value, (list, tuple)):
         return [
-            _bounded_value(item, depth + 1)
-            for item in list(value)[:MAX_VALUE_ITEMS]
+            _bounded_value(item, depth + 1) for item in list(value)[:MAX_VALUE_ITEMS]
         ]
     return str(value)[:MAX_VALUE_CHARS]
 
@@ -109,6 +112,12 @@ class PyCanoeBackend:
         self._raw_frame_capl_function = "ANDA_TransmitCanFrame"
         self._initialization_warnings: list[str] = []
         self._mode_verified = False
+        self._instance_mode = "managed"
+        self._owns_canoe_process = False
+        self._can_quit = False
+        self._measurement_started_by_session = False
+        self._network_database: NetworkDatabase | None = None
+        self._network_database_paths: tuple[Path, ...] = ()
 
     @classmethod
     def probe_environment(cls) -> dict[str, Any]:
@@ -223,11 +232,38 @@ class PyCanoeBackend:
         self._wait = wait
         self._bus_type = BusType
         self._mode = spec["mode"]
+        self._instance_mode = spec.get("instance_mode", "managed")
         self._configuration_origin = spec["configuration_origin"]
         self._raw_frame_capl_function = spec.get(
             "raw_frame_capl_function", "ANDA_TransmitCanFrame"
         )
+        before = _canoe_processes()
         self._canoe = CANoe(py_canoe_log_dir=spec["temp_directory"])
+        active_com = _has_active_canoe_application()
+        if self._instance_mode == "managed":
+            if before or active_com:
+                raise DynamicStateError(
+                    "managed 模式检测到既有 CANoe 实例；拒绝复用用户进程，"
+                    "请关闭该实例或明确使用 attached"
+                )
+        elif self._instance_mode == "attached":
+            if len(before) != 1 or not active_com:
+                raise DynamicStateError(
+                    "attached 模式要求恰好一个已运行且已注册 COM 的 CANoe 实例；"
+                    "无法可靠确定目标时拒绝附着"
+                )
+        else:
+            raise DynamicInputError("instance_mode 仅支持 managed 或 attached")
+
+        if self._instance_mode == "attached":
+            if not self._canoe.attach_to_active_application():
+                raise DynamicBackendError("无法附着到已运行的 CANoe")
+            self._verify_attached_mode()
+            self._version = self._canoe.get_canoe_version_info()
+            self._owns_canoe_process = False
+            self._can_quit = False
+            return self.get_status()
+
         configuration_path = spec.get("configuration_path")
         if configuration_path:
             opened = self._canoe.open(
@@ -247,6 +283,14 @@ class PyCanoeBackend:
                 self._canoe.application.visible = bool(spec.get("visible", False))
         if not opened:
             raise DynamicBackendError("CANoe Configuration 打开或创建失败")
+
+        self._owns_canoe_process = True
+        self._can_quit = True
+        after = _canoe_processes()
+        if len(after) != 1:
+            raise DynamicStateError(
+                "managed 模式启动后无法唯一确认 CANoe 进程所有权；拒绝继续"
+            )
 
         self._version = self._canoe.get_canoe_version_info()
         if not configuration_path:
@@ -273,6 +317,29 @@ class PyCanoeBackend:
         if blf_path and not self._canoe.add_offline_source_log_file(blf_path):
             raise DynamicBackendError(f"无法添加 BLF Offline Source：{blf_path}")
         return self.get_status()
+
+    def _verify_attached_mode(self) -> None:
+        configuration = self._canoe.application.configuration
+        com_object = configuration.com_object
+        mode_member = (
+            "mode"
+            if hasattr(com_object, "mode")
+            else "Mode"
+            if hasattr(com_object, "Mode")
+            else None
+        )
+        if mode_member is None:
+            raise DynamicStateError(
+                "当前 CANoe COM 类型库不能确认 attached Configuration 模式；拒绝附着"
+            )
+        actual = int(getattr(com_object, mode_member))
+        actual_mode = "offline" if actual == 1 else "online" if actual == 0 else None
+        if actual_mode is None or actual_mode != self._mode:
+            raise DynamicStateError(
+                f"attached Configuration 模式为 {actual_mode or actual}，"
+                f"与明确请求的 {self._mode} 不一致"
+            )
+        self._mode_verified = True
 
     def _set_configuration_mode(self, mode: str) -> None:
         configuration = self._canoe.application.configuration
@@ -321,7 +388,9 @@ class PyCanoeBackend:
                 self._configuration_origin == "temporary_configuration"
                 and network not in created_networks
             ):
-                bus_type = self._bus_type.CAN if item["bus"] == "can" else self._bus_type.LIN
+                bus_type = (
+                    self._bus_type.CAN if item["bus"] == "can" else self._bus_type.LIN
+                )
                 created = self._canoe.add_netWork(
                     network,
                     network_type=bus_type,
@@ -333,7 +402,9 @@ class PyCanoeBackend:
                     )
                 else:
                     created_networks.add(network)
-            target: str | int = network if network in created_networks else int(item["channel"])
+            target: str | int = (
+                network if network in created_networks else int(item["channel"])
+            )
             if not self._canoe.add_database(path, target):
                 raise DynamicBackendError(f"无法添加网络数据库：{path}")
 
@@ -346,6 +417,9 @@ class PyCanoeBackend:
         configuration = self._canoe.application.configuration
         return {
             "connected": True,
+            "instance_mode": self._instance_mode,
+            "owns_canoe_process": self._owns_canoe_process,
+            "can_quit": self._can_quit,
             "canoe_version": self._version,
             "license_view_only": "view only"
             in str(self._version.get("full_name", "")).casefold(),
@@ -407,12 +481,16 @@ class PyCanoeBackend:
             raise DynamicBackendError(f"CAPL 编译失败：{exc}") from exc
 
     def control_measurement(self, action: str) -> dict[str, Any]:
+        was_running = bool(self._canoe.get_measurement_running_status())
         if action == "start":
             success = self._canoe.start_measurement(timeout=30)
+            if success and not was_running:
+                self._measurement_started_by_session = True
         elif action == "stop":
             success = self._canoe.stop_measurement(timeout=30)
             if success:
                 self._animation_state = "stopped"
+                self._measurement_started_by_session = False
         elif action == "reset":
             success = self._canoe.reset_measurement(timeout=30)
         else:
@@ -436,6 +514,7 @@ class PyCanoeBackend:
                 if not success:
                     raise DynamicBackendError("CANoe Offline Animation 启动失败")
                 self._animation_state = "running"
+                self._measurement_started_by_session = True
             elif action == "pause":
                 if not self._canoe.break_measurement_in_offline_mode():
                     raise DynamicBackendError("CANoe Offline Animation 暂停失败")
@@ -457,6 +536,7 @@ class PyCanoeBackend:
                 if not self._canoe.stop_measurement(timeout=30):
                     raise DynamicBackendError("CANoe Offline Animation 停止失败")
                 self._animation_state = "stopped"
+                self._measurement_started_by_session = False
             else:
                 raise DynamicInputError(
                     "offline animation action 仅支持 start、pause、resume、step、reset、stop"
@@ -492,7 +572,9 @@ class PyCanoeBackend:
             elif event == "measurement_stopped":
                 matched = bool(measurement_events.STOP)
             else:
-                matched = any(self._test_event(item, event) for item in self._active_test_modules)
+                matched = any(
+                    self._test_event(item, event) for item in self._active_test_modules
+                )
             if matched or time.monotonic() >= deadline:
                 break
             self._canoe.application.pump_messages()
@@ -666,15 +748,51 @@ class PyCanoeBackend:
                 plain = {
                     key: value
                     for key, value in item.items()
-                    if key != "com_obj" and isinstance(value, (str, int, float, bool, type(None)))
+                    if key != "com_obj"
+                    and isinstance(value, (str, int, float, bool, type(None)))
                 }
-                if not needle or needle in str(name).casefold() or needle in str(plain).casefold():
+                if (
+                    not needle
+                    or needle in str(name).casefold()
+                    or needle in str(plain).casefold()
+                ):
                     values.append(plain)
+        elif kind in {"message", "signal"}:
+            database = self._current_network_database()
+            values = []
+            for message in database.messages:
+                if bus and message.bus_type != bus.casefold():
+                    continue
+                if kind == "message":
+                    item = {
+                        "database_file": message.path.name,
+                        "bus_type": message.bus_type,
+                        "frame_id": message.frame_id,
+                        "frame_id_hex": f"0x{message.frame_id:X}",
+                        "message": message.name,
+                        "signal_count": len(message.signal_names),
+                    }
+                    haystack = f"{message.name} {message.frame_id:X} {message.path.name}".casefold()
+                    if not needle or needle in haystack:
+                        values.append(item)
+                else:
+                    for signal in message.signal_names:
+                        haystack = (
+                            f"{message.name} {signal} {message.path.name}".casefold()
+                        )
+                        if not needle or needle in haystack:
+                            values.append(
+                                {
+                                    "database_file": message.path.name,
+                                    "bus_type": message.bus_type,
+                                    "frame_id": message.frame_id,
+                                    "frame_id_hex": f"0x{message.frame_id:X}",
+                                    "message": message.name,
+                                    "signal": signal,
+                                }
+                            )
         else:
-            raise DynamicUnsupportedError(
-                f"py-canoe Backend 无法可靠枚举 {kind}；"
-                "提供 DBC/LDF/ARXML 时 Dynamic Core 将改用共享 Trace Database"
-            )
+            raise DynamicInputError("kind 仅支持 database、node、message、signal")
         total = len(values)
         return {
             "kind": kind,
@@ -685,6 +803,22 @@ class PyCanoeBackend:
             "limit_applied": applied_limit,
             "items": values[:applied_limit],
         }
+
+    def _current_network_database(self) -> NetworkDatabase:
+        paths = tuple(
+            Path(value).resolve()
+            for value in self._canoe.get_simulation_database_paths()
+            if Path(value).is_file()
+            and Path(value).suffix.casefold() in DATABASE_EXTENSIONS
+        )
+        if not paths:
+            raise DynamicUnsupportedError(
+                "当前 CANoe Configuration 未加载可解析的 DBC/ARXML/LDF 数据库"
+            )
+        if self._network_database is None or paths != self._network_database_paths:
+            self._network_database = NetworkDatabase(paths)
+            self._network_database_paths = paths
+        return self._network_database
 
     def get_debug_snapshot(
         self,
@@ -698,13 +832,17 @@ class PyCanoeBackend:
             try:
                 signal_results.append({"ok": True, **self.get_signal(**request)})
             except Exception as exc:  # noqa: BLE001 - 快照保留局部失败
-                signal_results.append({"ok": False, "request": request, "error": _exception_details(exc)})
+                signal_results.append(
+                    {"ok": False, "request": request, "error": _exception_details(exc)}
+                )
         variable_results = []
         for request in variables[:10]:
             try:
                 variable_results.append({"ok": True, **self.get_variable(**request)})
             except Exception as exc:  # noqa: BLE001 - 快照保留局部失败
-                variable_results.append({"ok": False, "request": request, "error": _exception_details(exc)})
+                variable_results.append(
+                    {"ok": False, "request": request, "error": _exception_details(exc)}
+                )
         return {
             "captured_at": timestamp,
             "status": self.get_status(),
@@ -940,8 +1078,10 @@ class PyCanoeBackend:
             (
                 block
                 for block in blocks
-                if str(block.full_name).casefold() == str(block_name or output_path or "").casefold()
-                or Path(str(block.full_name)).name.casefold() == str(block_name or "").casefold()
+                if str(block.full_name).casefold()
+                == str(block_name or output_path or "").casefold()
+                or Path(str(block.full_name)).name.casefold()
+                == str(block_name or "").casefold()
             ),
             None,
         )
@@ -954,7 +1094,9 @@ class PyCanoeBackend:
             target.trigger.stop()
             self._active_logging_blocks.discard(str(target.full_name))
         else:
-            raise DynamicInputError("logging action 仅支持 list、configure、start、stop")
+            raise DynamicInputError(
+                "logging action 仅支持 list、configure、start、stop"
+            )
         return {
             "action": action,
             "full_name": str(target.full_name),
@@ -1043,9 +1185,7 @@ class PyCanoeBackend:
 
     def get_test_result(self, name: str | None, limit: int) -> dict[str, Any]:
         modules = (
-            [self._find_test_module(name)]
-            if name
-            else list(self._active_test_modules)
+            [self._find_test_module(name)] if name else list(self._active_test_modules)
         )
         results = []
         for module in modules[: min(limit, MAX_MODEL_RESULTS)]:
@@ -1058,9 +1198,13 @@ class PyCanoeBackend:
                     "stopped": bool(events.TM_STOPPED),
                     "verdict_fail_event": bool(events.TC_FAIL),
                     "verdict": int(module.verdict),
-                    "verdict_name": module.VALUE_TABLE_VERDICT.get(int(module.verdict), "Unknown"),
+                    "verdict_name": module.VALUE_TABLE_VERDICT.get(
+                        int(module.verdict), "Unknown"
+                    ),
                     "stop_reason": stop_reason,
-                    "stop_reason_name": events.VALUE_TABLE_STOP_REASON.get(stop_reason, "Unknown"),
+                    "stop_reason_name": events.VALUE_TABLE_STOP_REASON.get(
+                        stop_reason, "Unknown"
+                    ),
                 }
             )
         return {
@@ -1081,13 +1225,17 @@ class PyCanoeBackend:
                 if events.TM_STARTED and not events.TM_STOPPED:
                     module.stop(timeout=10)
             except Exception as exc:  # noqa: BLE001 - 继续清理其余资源
-                errors.append({"operation": "stop_test", "error": _exception_details(exc)})
+                errors.append(
+                    {"operation": "stop_test", "error": _exception_details(exc)}
+                )
         for name, state in list(self._replay_states.items()):
             if state == "running":
                 try:
                     self.control_replay(name, "stop")
                 except Exception as exc:  # noqa: BLE001
-                    errors.append({"operation": "stop_replay", "error": _exception_details(exc)})
+                    errors.append(
+                        {"operation": "stop_replay", "error": _exception_details(exc)}
+                    )
         if self._active_logging_blocks:
             try:
                 for block in self._canoe.get_logging_blocks():
@@ -1099,16 +1247,32 @@ class PyCanoeBackend:
                     {"operation": "stop_logging", "error": _exception_details(exc)}
                 )
         try:
-            if self._canoe.get_measurement_running_status():
+            if (
+                self._measurement_started_by_session
+                and self._canoe.get_measurement_running_status()
+            ):
                 self._canoe.stop_measurement(timeout=30)
         except Exception as exc:  # noqa: BLE001
-            errors.append({"operation": "stop_measurement", "error": _exception_details(exc)})
+            errors.append(
+                {"operation": "stop_measurement", "error": _exception_details(exc)}
+            )
         try:
-            quit_ok = bool(self._canoe.quit(timeout=30))
-            if not quit_ok:
-                errors.append({"operation": "quit", "error": {"message": "CANoe quit returned false"}})
+            if self._can_quit:
+                quit_ok = bool(self._canoe.quit(timeout=30))
+                if not quit_ok:
+                    errors.append(
+                        {
+                            "operation": "quit",
+                            "error": {"message": "CANoe quit returned false"},
+                        }
+                    )
+            else:
+                application = self._canoe.application
+                application._release_event_sinks()
+                self._canoe._reset_application()
         except Exception as exc:  # noqa: BLE001
-            errors.append({"operation": "quit", "error": _exception_details(exc)})
+            operation = "quit" if self._can_quit else "release_attachment"
+            errors.append({"operation": operation, "error": _exception_details(exc)})
         finally:
             self._canoe = None
             errors.extend(self._release_process_resources())
@@ -1139,6 +1303,49 @@ class PyCanoeBackend:
                 {"operation": "com_uninitialize", "error": _exception_details(exc)}
             )
         return errors
+
+
+def _canoe_processes() -> dict[int, str]:
+    """用系统进程表确认 CANoe 数量；查询失败时拒绝猜测所有权。"""
+    if platform.system() != "Windows":
+        raise DynamicUnsupportedError("CANoe ownership 仅支持 Windows")
+    try:
+        completed = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        processes: dict[int, str] = {}
+        for row in csv.reader(completed.stdout.splitlines()):
+            if len(row) < 2:
+                continue
+            name = row[0].strip()
+            if name.casefold().startswith("canoe") and name.casefold().endswith(".exe"):
+                processes[int(row[1].replace(",", ""))] = name
+        return processes
+    except Exception as exc:
+        raise DynamicStateError(
+            f"无法可靠枚举 CANoe 进程，拒绝判断实例所有权：{exc}"
+        ) from exc
+
+
+def _has_active_canoe_application() -> bool:
+    """只查询 COM Running Object Table，不触发 CANoe 启动。"""
+    try:
+        import pythoncom
+
+        pythoncom.GetActiveObject("CANoe.Application")
+        return True
+    except pythoncom.com_error:
+        return False
+    except Exception as exc:
+        raise DynamicStateError(
+            f"无法可靠查询 CANoe COM 活动实例，拒绝判断所有权：{exc}"
+        ) from exc
 
 
 __all__ = ["PyCanoeBackend", "_exception_details"]

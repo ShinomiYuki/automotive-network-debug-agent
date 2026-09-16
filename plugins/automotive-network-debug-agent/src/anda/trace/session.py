@@ -57,6 +57,7 @@ class TraceLoadTask:
     total_object_count: int | None = None
     error: str | None = None
     elapsed_seconds: float = 0.0
+    released: bool = False
     done: Event = field(default_factory=Event)
 
 
@@ -172,6 +173,33 @@ class TraceSessionManager:
             task.done.wait(wait_seconds)
         return self._task_result(task, reused=True)
 
+    def release_trace(self, trace_id: str) -> dict:
+        """释放一份 Trace；后台加载完成后也不得重新注册到常驻索引。"""
+        with self._load_lock:
+            session = self._sessions.pop(trace_id, None)
+            task = self._load_tasks.pop(trace_id, None)
+            if session is None and task is None:
+                return {
+                    "trace_id": trace_id,
+                    "released": False,
+                    "already_released": True,
+                }
+
+            if task is not None:
+                task.released = True
+                task.status = "released"
+                task.stage = "released"
+                if self._pending_keys.get(task.source_key) == trace_id:
+                    self._pending_keys.pop(task.source_key, None)
+            for source_key, ready_id in list(self._source_keys.items()):
+                if ready_id == trace_id:
+                    self._source_keys.pop(source_key, None)
+        return {
+            "trace_id": trace_id,
+            "released": True,
+            "was_loading": task is not None and not task.done.is_set(),
+        }
+
     def _run_background_load(self, task: TraceLoadTask) -> None:
         started = perf_counter()
         task.status = "loading"
@@ -191,16 +219,26 @@ class TraceSessionManager:
                     task.blf_path, task.database_paths, progress
                 )
             with self._load_lock:
+                if task.released:
+                    if self._pending_keys.get(task.source_key) == task.trace_id:
+                        self._pending_keys.pop(task.source_key, None)
+                    task.status = "released"
+                    task.stage = "released"
+                    return
                 self._sessions[task.trace_id] = session
                 self._source_keys[task.source_key] = task.trace_id
-                self._pending_keys.pop(task.source_key, None)
+                if self._pending_keys.get(task.source_key) == task.trace_id:
+                    self._pending_keys.pop(task.source_key, None)
             task.indexed_frame_count = len(session.store)
             task.status = "ready"
             task.stage = "ready"
         # 后台边界必须捕获并序列化所有失败，否则调用方只会看到永久 loading。
         except Exception as exc:  # noqa: BLE001
             with self._load_lock:
-                self._pending_keys.pop(task.source_key, None)
+                if self._pending_keys.get(task.source_key) == task.trace_id:
+                    self._pending_keys.pop(task.source_key, None)
+                if task.released:
+                    return
             task.error = f"{type(exc).__name__}: {exc}"
             task.status = "failed"
             task.stage = "failed"
@@ -650,9 +688,7 @@ def _validate_channel_mappings(mappings: list[dict]) -> list[dict]:
             raise TraceInputError("logical_network 和 mapping_source 不能为空")
         key = (bus_type, channel)
         if key in seen:
-            raise TraceInputError(
-                f"mappings 中重复定义 {bus_type.upper()}{channel}"
-            )
+            raise TraceInputError(f"mappings 中重复定义 {bus_type.upper()}{channel}")
         seen.add(key)
         result.append(
             {

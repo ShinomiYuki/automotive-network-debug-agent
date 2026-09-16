@@ -142,6 +142,38 @@ def test_background_load_surfaces_failure_and_allows_retry(tmp_path):
     )
 
 
+def test_release_trace_during_background_load_does_not_retain_session(
+    trace_files, monkeypatch
+):
+    blf_path, dbc_path = trace_files
+    manager = TraceSessionManager()
+    entered = Event()
+    resume = Event()
+    original_build = TraceSessionManager._build_session
+
+    def delayed_build(*args, **kwargs):
+        entered.set()
+        resume.wait(5)
+        return original_build(*args, **kwargs)
+
+    monkeypatch.setattr(
+        TraceSessionManager, "_build_session", staticmethod(delayed_build)
+    )
+    started = manager.start_load_trace(str(blf_path), str(dbc_path))
+    assert entered.wait(1)
+    task = manager._load_tasks[started["trace_id"]]
+
+    released = manager.release_trace(started["trace_id"])
+    resume.set()
+    assert task.done.wait(5)
+
+    assert released["released"] is True
+    assert released["was_loading"] is True
+    with pytest.raises(TraceNotFoundError, match="未知 trace_id"):
+        manager.get_load_status(started["trace_id"], wait_seconds=5)
+    assert started["trace_id"] not in manager._sessions
+
+
 def test_summary_reports_time_channels_and_can_types(trace_files):
     blf_path, dbc_path = trace_files
     manager = TraceSessionManager()
@@ -437,8 +469,9 @@ def test_routed_timeout_pairs_events_and_reports_per_channel_statistics(
     targets = {item["analysis_channel"]: item for item in event["targets"]}
     assert targets[8]["missed_bus_frame_count"] == 1
     assert targets[9]["missed_bus_frame_count"] == 2
-    assert targets[8]["first_target_old_after_source_stop"]["timestamp"] < (
-        event["deadline_timestamp"]
+    assert (
+        targets[8]["first_target_old_after_source_stop"]["timestamp"]
+        < (event["deadline_timestamp"])
     )
     assert targets[8]["source_to_timeout_ms"] == pytest.approx(520.0)
     assert targets[9]["source_to_timeout_ms"] == pytest.approx(540.0)

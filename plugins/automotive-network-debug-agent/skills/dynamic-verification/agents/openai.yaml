@@ -1,0 +1,7 @@
+interface:
+  display_name: "Dynamic Verification"
+  short_description: "用 CANoe 最小实验验证汽车网络运行时候选假设"
+  default_prompt: "使用 $dynamic-verification 在安全 CANoe 环境中先采集 baseline，再执行一个最小刺激并恢复状态。"
+
+policy:
+  allow_implicit_invocation: true

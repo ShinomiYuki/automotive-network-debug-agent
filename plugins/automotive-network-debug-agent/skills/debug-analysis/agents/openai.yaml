@@ -1,7 +1,7 @@
 interface:
   display_name: "Debug Analysis"
-  short_description: "联合 Trace、配置、源码与反证定位汽车网络故障原因"
-  default_prompt: "使用 $debug-analysis 联合调查我提供的日志、Channel 映射、工程配置并按需生成证据报告。"
+  short_description: "联合 Trace、配置与按需 CANoe 动态实验定位故障"
+  default_prompt: "使用 $debug-analysis 联合调查日志、Channel 映射和工程配置，仅在需要验证运行时假设时执行 CANoe 最小实验。"
 
 policy:
   allow_implicit_invocation: true

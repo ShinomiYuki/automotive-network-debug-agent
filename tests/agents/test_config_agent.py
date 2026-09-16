@@ -61,6 +61,7 @@ def test_config_skill_is_packaged_and_has_discriminating_invocation_metadata():
         "trace-analysis",
         "config-analysis",
         "debug-analysis",
+        "dynamic-verification",
     }
     assert not (ROOT / ".agents" / "skills" / "config-analysis").exists()
     assert not (ROOT / "skills" / "config-analysis").exists()

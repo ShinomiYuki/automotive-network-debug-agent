@@ -8,7 +8,8 @@ param(
     [string]$OutputPath = (Join-Path (
         [Environment]::GetFolderPath('LocalApplicationData')
     ) 'AutomotiveNetworkDebugAgent/diagnostics/canoe-capabilities.json'),
-    [string]$TempRoot
+    [string]$TempRoot,
+    [switch]$LicenseConfirmed
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,10 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8NoBom
 $OutputEncoding = $utf8NoBom
 $env:PYTHONUTF8 = '1'
+
+if (-not $LicenseConfirmed) {
+    throw '启动 CANoe 前请确认有效许可证，并使用 -LicenseConfirmed 明确允许本次占用。'
+}
 
 $pluginRoot = Split-Path -Parent $PSScriptRoot
 $sourceRoot = Join-Path $pluginRoot 'src'

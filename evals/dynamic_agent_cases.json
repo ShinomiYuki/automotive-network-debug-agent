@@ -1,0 +1,60 @@
+{
+  "description": "Dynamic Agent 的 Harness 原生确定性计划规格；不实现或模拟模型推理。",
+  "required_output_sections": [
+    "动态验证结论",
+    "实验过程",
+    "关键观察",
+    "不确定项",
+    "下一步建议"
+  ],
+  "cases": [
+    {
+      "id": "license_confirmation_missing",
+      "expected_tool_plan": [],
+      "forbidden_tools": ["create_dynamic_session"],
+      "expected_behavior": ["先询问用户确认有效许可证和本次占用", "不从进程或历史状态猜测"]
+    },
+    {
+      "id": "blf_only_offline",
+      "expected_tool_plan": ["create_dynamic_session", "observe_bus_window", "control_offline_animation", "wait_runtime_event", "observe_bus_window", "close_dynamic_session"],
+      "expected_behavior": ["managed offline", "先 baseline 后播放", "始终 cleanup"]
+    },
+    {
+      "id": "attached_preserves_user_canoe",
+      "expected_tool_plan": ["create_dynamic_session", "get_dynamic_status", "close_dynamic_session"],
+      "expected_behavior": ["instance_mode=attached", "不传 configuration_path", "owns_canoe_process=false", "can_quit=false"]
+    },
+    {
+      "id": "signal_restore",
+      "expected_tool_plan": ["create_dynamic_session", "get_signal", "set_signal", "wait_runtime_event", "get_signal", "set_signal", "get_signal", "close_dynamic_session"],
+      "expected_behavior": ["baseline → 修改 → 观察 → 恢复 → 确认"]
+    },
+    {
+      "id": "system_variable_restore",
+      "expected_tool_plan": ["create_dynamic_session", "get_variable", "set_variable", "get_variable", "set_variable", "get_variable", "close_dynamic_session"],
+      "expected_behavior": ["使用 baseline 原值恢复"]
+    },
+    {
+      "id": "raw_can_missing_parameters",
+      "expected_tool_plan": [],
+      "forbidden_tools": ["create_dynamic_session", "transmit_can_frame"],
+      "expected_behavior": ["Channel、CAN ID、Payload 或帧类型不明确时先询问，不猜参数"]
+    },
+    {
+      "id": "minimal_runtime_policy",
+      "expected_tool_plan": ["create_dynamic_session", "get_signal", "close_dynamic_session"],
+      "expected_behavior": ["只授权 observation", "不自动全开 BUS_ACTIVE"]
+    },
+    {
+      "id": "tool_failure_no_fabrication",
+      "expected_tool_plan": ["create_dynamic_session", "get_signal", "close_dynamic_session"],
+      "expected_behavior": ["Tool 失败后结论为当前无法验证", "不编造 before/after", "仍 cleanup"]
+    },
+    {
+      "id": "evidence_already_sufficient",
+      "expected_tool_plan": [],
+      "forbidden_tools": ["get_dynamic_health", "create_dynamic_session"],
+      "expected_behavior": ["Trace 或 Config 已充分回答时不调用 Dynamic"]
+    }
+  ]
+}

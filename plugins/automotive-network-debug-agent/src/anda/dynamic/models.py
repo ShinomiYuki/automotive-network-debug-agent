@@ -26,6 +26,14 @@ class DynamicMode(StrEnum):
 class ConfigurationOrigin(StrEnum):
     TEMPORARY_CONFIGURATION = "temporary_configuration"
     SHADOW_COPY = "shadow_copy"
+    ATTACHED_CONFIGURATION = "attached_configuration"
+
+
+class InstanceMode(StrEnum):
+    """CANoe 进程所有权模式。"""
+
+    MANAGED = "managed"
+    ATTACHED = "attached"
 
 
 class RuntimeCapability(StrEnum):
@@ -72,6 +80,9 @@ class DynamicSession:
     dynamic_session_id: str
     mode: DynamicMode
     configuration_origin: ConfigurationOrigin
+    instance_mode: InstanceMode
+    owns_canoe_process: bool
+    can_quit: bool
     runtime_capabilities: frozenset[RuntimeCapability]
     worker: Any
     temp_directory: Path

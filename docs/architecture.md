@@ -10,13 +10,16 @@
 
 ```text
 Codex / 兼容 Agent Harness（提供模型推理）
-        │                         │
-        ▼                         ▼
-Debug Analysis Skill      Automotive Dynamic MCP
-Trace/Config 联合规划       受控 CANoe 动态验证
-    /          \                    │
-   ▼            ▼             BLF / 可选 .cfg
-Trace MCP    Config MCP       CANoe COM Automation
+        │
+        ▼
+Debug Analysis Skill（按证据需要路由）
+    /          |             \
+   ▼           ▼              ▼
+Trace Skill  Config Skill  Dynamic Verification Skill
+   │           │              │
+Trace MCP   Config MCP    Dynamic MCP
+   │           │              │
+BLF/Database  工程/ARXML   CANoe COM Automation
    │            │
 BLF/Database  工程源码/Generated Config
               + 可选 ARXML
@@ -27,19 +30,18 @@ BLF/Database  工程源码/Generated Config
 ```text
 Trace Analysis Skill ──→ Automotive Trace MCP
 Config Analysis Skill ─→ Automotive Config MCP
+Dynamic Verification Skill ─→ Automotive Dynamic MCP
 ```
 
 Codex 的分发单元是 `plugins/automotive-network-debug-agent/`。其中同时包含 Trace、
-Config、Debug 三个 Skill、三个 MCP 配置、PowerShell 启动器和 Python 源码；安装后从 Codex 插件缓存运行，
+Config、Dynamic、Debug 四个 Skill、三个 MCP 配置、PowerShell 启动器和 Python 源码；安装后从 Codex 插件缓存运行，
 不依赖开发仓库路径。仓库根目录的 `.agents/plugins/marketplace.json` 只负责发布
 市场索引，不存放另一份 Skill。
 
 模型由用户当前的 Harness 登录态提供。本项目既不实现模型运行时，也不读取
-`OPENAI_API_KEY`。Trace 与 Config Skill 分别自主选择各自的只读 MCP Tool；Debug
-Skill 按问题动态选择 Trace、Config 或两者，并只在第一阶段结果需要进一步静态或
-动态证据时进入第二阶段。三个 Skill 均直接使用现有 MCP，不进行 Skill-to-Skill 调用。
-Dynamic 本轮是独立 Core 与 MCP，直接接受 Harness 的明确 Tool 调用；没有新增 Dynamic
-Skill，也没有加入 Debug Skill 自动编排。
+`OPENAI_API_KEY`。三个专业 Skill 分别自主选择对应 MCP Tool；Debug Skill 按问题动态
+选择 Trace、Config 和必要时的 Dynamic。Dynamic 只用于验证一个明确运行时假设，不是
+固定第三阶段。四个 Skill 均直接使用现有 MCP，不进行 Skill-to-Skill 调用。
 
 Trace 与 Config MCP 的 Load Tool 都只负责规范化输入、去重后台任务并立即返回稳定 ID。大型 BLF
 或工程索引由受限后台 worker 完成，Harness 通过状态 Tool 读取阶段、计数、进度和耗时；
@@ -59,8 +61,9 @@ Dynamic MCP 是有状态、单 Session 的 CANoe 适配层：
 ```text
 create_dynamic_session
         │
-        ├─ BLF only ─────→ 工作区外临时 .cfg
-        └─ supplied .cfg ─→ 同目录影子 .cfg + 原文件摘要
+        ├─ managed / BLF ─→ 工作区外临时 .cfg
+        ├─ managed / cfg ─→ 同目录影子 .cfg + 原文件摘要
+        └─ attached ──────→ 唯一活动 CANoe，只持有 COM 引用
         │
         ▼
 单一 Backend Worker Thread
@@ -75,7 +78,10 @@ py-canoe 26.4.1 / CANoe COM
 ```
 
 所有 CANoe COM 对象仅在专用 worker 线程创建和访问，避免跨 Apartment 使用。Session
-关闭时按“停止活动操作 → 退出 CANoe → 删除影子配置 → 校验原配置 → 删除临时目录”收敛；
+managed 关闭时按“停止本 Session 操作 → 退出所拥有 CANoe → 删除影子配置 → 校验原配置 → 删除临时目录”收敛；
+attached 仅停止本 Session 启动的操作并释放 COM 引用，绝不调用 `quit()`。状态顶层返回
+`instance_mode`、`owns_canoe_process` 和 `can_quit`。创建前通过系统进程表和 COM 活动对象
+双重确认所有权；无法唯一确认时保守拒绝。
 清理失败会作为结构化结果返回。`get_dynamic_health` 只做静态环境探测，不启动 CANoe
 或占用许可证。
 
@@ -90,7 +96,12 @@ Session 时显式授权。工具元数据再把操作分为 `READ_ONLY`、`LOCAL
 
 Dynamic 的 BLF 窗口观察直接复用 Trace Core 的索引与有界输出，不通过 Trace MCP 产生
 MCP-to-MCP 调用。CANoe 实时读取、播放游标和运行事件由 Dynamic backend 提供，两类事实
-在 Session 返回值中明确标注来源。
+在 Session 返回值中明确标注来源。Session 关闭会调用私有 `TraceSessionManager.release_trace`；
+即使索引仍在后台 loading，完成后也不会重新注册为常驻 Session。
+
+cfg-only 网络模型从当前 CANoe Configuration 已加载数据库路径构建统一 Database 索引，
+稳定支持 Database、Node、Message、Signal。Node 来自当前 CANoe Bus COM 模型，Message 与
+Signal 使用项目已有 DBC/ARXML/LDF 解析器；未可靠实现的 Symbol 已从 Tool Contract 删除。
 
 原始 CAN/CAN FD 注入使用配置内的 `ANDA_TransmitCanFrame` CAPL Bridge，并在调用前限制
 ID、Classic/FD 载荷长度、帧数、间隔和总时长。Bridge 不存在时返回不支持；Core 不隐式
@@ -104,6 +115,7 @@ Trace only
 Config only
 Trace → Config
 Config → Trace
+Trace/Config → Dynamic（仅明确运行时假设）
 ```
 
 Debug Skill 只在阶段之间传递 CAN ID、Message/PDU/Signal 名、源/目标网段、Channel、
@@ -117,9 +129,9 @@ Trace Session；配置顺序和命名均不能用于猜测映射。CAN→LIN tim
 CDD 的生产者、消费者、任务、处理模式、控制引用与限定范围反证。用户要求持久化时，
 Config MCP 可在明确输出目录创建 JSON investigation bundle 并确定性导出 Markdown。
 
-## Codex Subagent 增强 TODO
+## Harness-native Agent 结构
 
-下图是未来 Codex 专属增强方向，不代表当前版本已经实现独立 Subagent 或 Tool scope：
+当前四个 Skill 由同一 Harness 原生运行，不实现独立 Subagent 或模型 Runtime：
 
 ```text
 Codex 本地 Harness
@@ -135,8 +147,8 @@ Codex 本地 Harness
  Trace MCP Config MCP  Dynamic MCP
 ```
 
-其中 Dynamic MCP 已实现；未来项只是为它增加专业 Skill/Subagent 与 Debug 编排，而不是
-重新实现模型运行时或 CANoe Core。
+Dynamic Skill 以“假设 → 最小 policy → baseline → 单一刺激 → 事件等待 → 观察 → 恢复 →
+close”为固定流程。Debug 只有在 Trace/Config 仍留下明确可检验假设时才进入该流程。
 
 未来 TODO：
 

@@ -49,17 +49,21 @@ def create_dynamic_session(
     database_mappings: list[dict[str, Any]] | None = None,
     configuration_path: str | None = None,
     mode: str = "auto",
+    instance_mode: str = "managed",
+    license_confirmed: bool = False,
     runtime_policy: list[str] | None = None,
     visible: bool = False,
     raw_frame_capl_function: str = "ANDA_TransmitCanFrame",
 ) -> dict:
-    """从 BLF 和/或 cfg 创建一个持久 CANoe Session；auto 始终选择 offline。"""
+    """用户确认许可证后创建 managed/attached Session；未确认时不启动 CANoe。"""
     return sessions.create_dynamic_session(
         blf_path=blf_path,
         database_paths=database_paths,
         database_mappings=database_mappings,
         configuration_path=configuration_path,
         mode=mode,
+        instance_mode=instance_mode,
+        license_confirmed=license_confirmed,
         runtime_policy=runtime_policy,
         visible=visible,
         raw_frame_capl_function=raw_frame_capl_function,
@@ -74,7 +78,7 @@ def get_dynamic_status(dynamic_session_id: str) -> dict:
 
 @mcp.tool(annotations=RUNTIME_MUTATION)
 def close_dynamic_session(dynamic_session_id: str) -> dict:
-    """停止活动操作、退出 CANoe、清理临时资产并核验原 cfg 未改变。"""
+    """清理本 Session；只有 managed 所有者可退出 CANoe。"""
     return sessions.close_dynamic_session(dynamic_session_id)
 
 
@@ -178,7 +182,7 @@ def inspect_network_model(
     bus: str = "CAN",
     limit: int = 50,
 ) -> dict:
-    """统一浏览 Database、Node、Message、Signal 或 Symbol。"""
+    """浏览当前 CANoe Configuration 的 Database、Node、Message 或 Signal。"""
     return sessions.inspect_network_model(dynamic_session_id, kind, query, bus, limit)
 
 
@@ -295,9 +299,7 @@ def manage_logging(
     block_name: str | None = None,
 ) -> dict:
     """统一 list、configure、start 或 stop Logging Block。"""
-    return sessions.manage_logging(
-        dynamic_session_id, action, output_path, block_name
-    )
+    return sessions.manage_logging(dynamic_session_id, action, output_path, block_name)
 
 
 @mcp.tool(annotations=READ_ONLY)

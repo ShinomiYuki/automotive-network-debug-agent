@@ -51,7 +51,22 @@ CONFIG_TOOLS = {
     "trace_autosar_runtime_chain",
     "find_source_context",
 }
-ALL_TOOLS = TRACE_TOOLS | CONFIG_TOOLS
+DYNAMIC_TOOLS = {
+    "get_dynamic_health",
+    "create_dynamic_session",
+    "get_dynamic_status",
+    "close_dynamic_session",
+    "wait_runtime_event",
+    "observe_bus_window",
+    "get_signal",
+    "get_variable",
+    "get_debug_snapshot",
+    "set_signal",
+    "set_variable",
+    "call_capl_function",
+    "transmit_can_frame",
+}
+ALL_TOOLS = TRACE_TOOLS | CONFIG_TOOLS | DYNAMIC_TOOLS
 OUTPUT_SECTIONS = ["综合判断", "关键证据", "候选原因", "不确定项", "下一步建议"]
 CASE_IDS = {
     "trace_only_message_presence",
@@ -66,6 +81,7 @@ CASE_IDS = {
     "missing_inputs_asks_minimum",
     "config_then_trace_when_route_exists",
     "can_to_lin_timeout_with_report",
+    "trace_config_then_dynamic_runtime_condition",
 }
 
 
@@ -76,14 +92,16 @@ def test_debug_skill_is_packaged_with_discriminating_metadata():
     assert content.startswith("---\nname: debug-analysis\n")
     frontmatter = content.split("---", 2)[1]
     assert "跨来源问题" in frontmatter
-    assert "单纯日志事实调查应使用 trace-analysis" in frontmatter
-    assert "单纯静态配置查询应使用 config-analysis" in frontmatter
+    assert "单纯日志事实使用 trace-analysis" in frontmatter
+    assert "单纯静态配置使用 config-analysis" in frontmatter
+    assert "单一动态实验使用 dynamic-verification" in frontmatter
     assert 'display_name: "Debug Analysis"' in interface
     assert "$debug-analysis" in interface
     assert "allow_implicit_invocation: true" in interface
     assert {path.name for path in (PLUGIN_ROOT / "skills").iterdir()} == {
         "trace-analysis",
         "config-analysis",
+        "dynamic-verification",
         "debug-analysis",
     }
 
@@ -91,7 +109,13 @@ def test_debug_skill_is_packaged_with_discriminating_metadata():
 def test_debug_skill_defines_dynamic_routes_evidence_rules_and_fixed_output():
     content = SKILL_PATH.read_text(encoding="utf-8")
 
-    for route in ("Trace only", "Config only", "Trace → Config", "Config → Trace"):
+    for route in (
+        "Trace only",
+        "Config only",
+        "Trace → Config",
+        "Config → Trace",
+        "Trace/Config → Dynamic",
+    ):
         assert f"`{route}`" in content
     heading_positions = [content.index(f"## {section}") for section in OUTPUT_SECTIONS]
     assert heading_positions == sorted(heading_positions)
@@ -111,6 +135,8 @@ def test_debug_skill_defines_dynamic_routes_evidence_rules_and_fixed_output():
     assert "`analyze_routed_signal_timeout`" in content
     assert "`trace_autosar_runtime_chain`" in content
     assert "`create_investigation_bundle`" in content
+    assert "不得机械启动 CANoe" in content
+    assert "无论成功失败都调用 `close_dynamic_session`" in content
     assert (SKILL_ROOT / "references" / "investigation-workflow.md").is_file()
 
 
@@ -126,6 +152,7 @@ def test_debug_eval_covers_routes_stage_gates_handoffs_and_minimal_loads():
         "trace_then_config",
         "config_then_trace",
         "ask_input",
+        "trace_config_then_dynamic",
     }
 
     for case in specification["cases"]:
@@ -140,6 +167,9 @@ def test_debug_eval_covers_routes_stage_gates_handoffs_and_minimal_loads():
         assert not (set(plan) & set(forbidden))
         assert plan.count("load_trace") <= 1
         assert plan.count("load_config_workspace") <= 1
+        assert plan.count("create_dynamic_session") <= 1
+        if "create_dynamic_session" in plan:
+            assert plan[-1] == "close_dynamic_session"
         for index, stage in enumerate(case["expected_stages"]):
             if index:
                 assert stage["after_observation"]

@@ -2,7 +2,7 @@
 
 **A Multi-Source Data-Driven Agent for Automotive Network Fault Diagnosis**
 
-这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供 Trace Analysis、Config Analysis、Debug Analysis 和三个本地 MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”，Dynamic 通过本机 CANoe 做受控动态验证；Debug Skill 目前负责按需联合 Trace 与 Config 两类证据。
+这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供 Trace Analysis、Config Analysis、Dynamic Verification、Debug Analysis 四个 Harness-native Skill 和三个本地 MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”，Dynamic 用本机 CANoe 对候选原因做最小实验，Debug 按问题选择必要证据域。
 
 模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC、ARXML、工程源码、CANoe 自动化和三个 MCP 均保留在本机。
 
@@ -40,17 +40,23 @@
 - 跨域只传递 CAN ID、规范名称、网段、Channel、时间范围和已确认现象等有限事实。
 - 比较 Trace 与 Config 是否一致，区分高可信候选、证据冲突、版本不一致和证据不足。
 - 固定输出“综合判断、关键证据、候选原因、不确定项、下一步建议”。
+- 只有 Trace/Config 仍留下明确运行时假设时才进入 Dynamic，不把 CANoe 当作固定第三阶段。
 
 ### Dynamic
 
 - 以单个有状态 Dynamic Session 管理 CANoe 生命周期，所有 COM 调用固定在同一工作线程。
+- 区分 `managed` 与 `attached`：managed 只在确认无既有 CANoe 时启动并拥有进程；attached 只附着唯一活动实例，关闭时绝不退出用户 CANoe。
+- 启动或附着 CANoe 前必须由用户明确确认有效许可证和本次占用，随后传 `license_confirmed=true`；不根据进程或历史状态猜测。
+- `get_dynamic_status` 明确返回 `instance_mode`、`owns_canoe_process` 和 `can_quit`；所有权无法可靠确认时保守拒绝。
 - 只提供 BLF 时创建临时 CANoe 配置；提供 `.cfg` 时使用同目录影子副本并在关闭时核验原文件未改变。
 - `auto` 默认解析为离线模式；离线启动统一使用 Offline Animation，不把普通 Measurement Start 当作离线播放。
 - 复用 Trace Core 观察明确时间窗，不通过 Trace MCP 做 MCP-to-MCP 调用。
 - 读取 Signal、System/Environment Variable、Write Window、Bus Statistics、网络模型和调试快照。
+- cfg-only 网络模型直接读取当前 Configuration 已加载数据库，支持 Database、Node、Message 和 Signal，不声明不可用的 Symbol 浏览。
 - 受策略控制地设置 Signal/Variable、调用 CAPL、配置 Replay/Logging、运行测试与发送诊断请求。
 - 原始 CAN/CAN FD 注入具有帧数、间隔、总时长、ID 和载荷长度上限，并要求配置内存在明确的 CAPL Bridge。
 - 每个 Tool 都声明 `READ_ONLY`、`LOCAL_MUTATION`、`RUNTIME_MUTATION` 或 `BUS_ACTIVE` 副作用等级。
+- Dynamic Skill 固定执行“baseline → 一个最小刺激 → 事件等待 → 再观察 → 恢复 → close”，结论仅为支持、削弱或当前无法验证候选假设。
 
 ## Trace Agent 能做什么
 
@@ -80,6 +86,15 @@ Config Agent 只陈述工程源码和已加载配置能够证明的静态事实�
 - 当 Trace 与 Config 一致时形成有证据强度的候选原因；两者冲突时优先提示日志、DBC、源码和 ARXML 的版本一致性。
 - 当问题单描述与 BLF 不一致时，以日志证据指出当前样本未复现该陈述。
 - 在证据不足时保留不确定项，不编造 PduR、CanIf、Com、ECU、硬件或 CANoe 根因。
+- 当 Trace 已确认现象、Config 路由存在但运行时条件未知时，按需设计一个 CANoe 最小实验；Trace/Config 足够时不启动 CANoe。
+
+## Dynamic Agent 能做什么
+
+- 在安全测试 cfg 或用户明确附着的 CANoe 上验证一个运行时候选假设。
+- 先采集 Signal/Variable/总线窗口 baseline，再执行一个最小刺激，并恢复可恢复的值。
+- 对 Raw CAN 要求明确 Channel、CAN ID、Payload、Classic/FD、extended、BRS、次数和间隔，不猜参数。
+- 无论成功、失败或超时都关闭 Dynamic Session；Tool 失败时不伪造实验结果。
+- 固定输出“动态验证结论、实验过程、关键观察、不确定项、下一步建议”。
 
 ## 安装为 Codex Plugin
 
@@ -146,12 +161,13 @@ input/
 
 - `skills/trace-analysis/SKILL.md`：Trace 调查指令与证据边界；
 - `skills/config-analysis/SKILL.md`：Config 调查、Tool 选择与静态证据边界；
+- `skills/dynamic-verification/SKILL.md`：CANoe 最小动态实验、安全策略、恢复与 cleanup；
 - `skills/debug-analysis/SKILL.md`：动态调查规划、跨域有限信息传递与联合证据规则；
 - `.mcp.json`：随插件注册的 `automotive-trace`、`automotive-config` 与 `automotive-dynamic`；
 - `scripts/run_trace_mcp.ps1`、`run_config_mcp.ps1`、`run_dynamic_mcp.ps1`：复用同一 Python/Conda 解释器选择逻辑的启动器；
 - `src/anda/`：随插件分发的 Trace Core、Config Core、Dynamic Core 与三个 MCP 实现。
 
-显式调用时，在 Codex CLI 中输入 `$trace-analysis`、`$config-analysis` 或 `$debug-analysis`，也可以在 ChatGPT/Codex 插件界面用 `@` 选择对应 Skill。三个 Skill 都允许隐式触发，但职责描述互相区分：Trace 面向明确日志事实，Config 面向明确静态配置，Debug 只面向故障定位和跨来源综合问题，不会仅因用户提到“CAN”“PduR”或“BLF”就抢占专业 Skill。
+显式调用时，在 Codex CLI 中输入 `$trace-analysis`、`$config-analysis`、`$dynamic-verification` 或 `$debug-analysis`，也可以在 ChatGPT/Codex 插件界面用 `@` 选择对应 Skill。四个 Skill 都允许隐式触发，但职责互相区分：Trace 面向日志事实，Config 面向静态配置，Dynamic 面向单一运行时实验，Debug 面向跨来源故障定位。
 
 解释器也可临时通过 `ANDA_PYTHON` 环境变量指定。不要把个人代理、解释器绝对路径或其他机器配置写入 `.mcp.json` 或插件清单。项目本身不要求代理；确有网络需要时，应由用户在自己的运行环境中配置。
 
@@ -203,10 +219,10 @@ ARXML：D:\inputs\selected-project.arxml
 
 Debug Skill 会先用明确的网段到数字 Channel 映射在 BLF 中验证问题前提；若确认源网段存在而目标网段缺失，再把 `0x416`、`SU`、`IC` 和已确认现象传给 Config 调查路由。需要比较逻辑网段而映射未提供时会先询问，不从网段名猜 Channel。若 Trace 已推翻问题描述，或单个证据域已经回答问题，就不会机械调用另一 MCP。DBC 只在 Message/Signal 导航或信号解码确实需要时才要求。
 
-Dynamic MCP 本轮没有单独的 Skill，也尚未加入 Debug Skill 的自动编排。安装插件并新建 Codex 会话后，可以直接用自然语言明确要求使用 `automotive-dynamic`，同时提供 BLF、可选数据库或 CANoe 配置的绝对路径。例如：
+使用 `$dynamic-verification` 时提供 BLF、可选数据库或安全 CANoe 配置的绝对路径和待验证假设。例如：
 
 ~~~text
-请使用 automotive-dynamic 做离线验证。
+请使用 $dynamic-verification 做离线验证。
 BLF：D:\logs\issue.blf
 DBC：D:\database\vehicle.dbc
 模式：offline
@@ -301,9 +317,9 @@ python -m anda.mcp.dynamic.server
 | Tool | 副作用等级 | 用途 |
 | --- | --- | --- |
 | `get_dynamic_health` | `READ_ONLY` | 静态检查 Windows、CANoe、COM 与 py-canoe，不启动 CANoe 或占用许可证 |
-| `create_dynamic_session` | `LOCAL_MUTATION` | 从 BLF 临时配置或 `.cfg` 影子副本创建唯一活动 Session |
-| `get_dynamic_status` | `READ_ONLY` | 查看模式、配置来源、策略、CANoe、Measurement、Animation 与播放游标 |
-| `close_dynamic_session` | `RUNTIME_MUTATION` | 停止活动操作、退出 CANoe、删除影子配置和临时目录 |
+| `create_dynamic_session` | `LOCAL_MUTATION` | 创建 managed 临时/影子配置，或显式 attached 到唯一活动 CANoe |
+| `get_dynamic_status` | `READ_ONLY` | 查看模式、实例所有权、退出权限、策略、CANoe 与运行状态 |
+| `close_dynamic_session` | `RUNTIME_MUTATION` | 清理本 Session；仅 managed 所有者退出 CANoe，attached 只释放引用 |
 | `compile_capl` | `LOCAL_MUTATION` | 编译当前配置 CAPL 并返回有界 Write Window 证据 |
 | `control_measurement` | `RUNTIME_MUTATION` | 对在线 Session 执行 start/stop/reset；离线 start/reset 被拒绝 |
 | `control_offline_animation` | `RUNTIME_MUTATION` | 对离线 Session 执行 start/pause/step/reset/stop |
@@ -313,7 +329,7 @@ python -m anda.mcp.dynamic.server
 | `get_variable` | `READ_ONLY` | 读取 System Variable 或 Environment Variable |
 | `read_write_window` | `READ_ONLY` | 读取有行数和字符数上限的 CANoe Write Window |
 | `get_bus_statistics` | `READ_ONLY` | 读取指定 Channel 可用的 CANoe Bus Statistics |
-| `inspect_network_model` | `READ_ONLY` | 有界浏览 Database、Node、Message、Signal 或 Symbol |
+| `inspect_network_model` | `READ_ONLY` | 有界浏览当前 cfg 的 Database、Node、Message 或 Signal |
 | `get_debug_snapshot` | `READ_ONLY` | 一次读取有限 Signal、Variable、状态和 Write Window |
 | `set_signal` | `RUNTIME_MUTATION` | 在策略允许时设置 Signal 值 |
 | `set_variable` | `RUNTIME_MUTATION` | 在策略允许时设置 System/Environment Variable |
@@ -428,16 +444,20 @@ Config 搜索最多返回 50 个候选；源码上下文前后最多各 5 行，
     {"path": "D:\\database\\vehicle.dbc", "bus": "CAN", "channel": 1, "network_name": "Powertrain"}
   ],
   "mode": "auto",
+  "instance_mode": "managed",
+  "license_confirmed": true,
   "runtime_policy": ["observation", "offline_animation"]
 }
 ```
 
 返回的 `dynamic_session_id` 只在当前 Dynamic MCP 进程内有效。`auto` 不会自行进入在线模式；只提供 BLF 时创建工作区外临时 `.cfg`，提供 `.cfg` 时创建同目录影子副本。完成后必须调用 `close_dynamic_session`。
 
+附着用户已运行的 CANoe 时必须显式使用 `instance_mode="attached"` 并明确 `mode="offline"` 或 `mode="online"`，且不得传 `configuration_path`。状态必须显示 `owns_canoe_process=false`、`can_quit=false`；如果活动实例数量或 COM 所有权无法可靠确认，Session 创建会拒绝。
+
 内网许可证只能在 Codex 不可连接的网络中使用时，可以先在该网络上一键采集不发报文、不发诊断请求的 CANoe 能力报告，之后再把 JSON 交给 Codex：
 
 ```powershell
-pwsh -NoProfile -File .\plugins\automotive-network-debug-agent\scripts\collect_dynamic_capabilities.ps1
+pwsh -NoProfile -File .\plugins\automotive-network-debug-agent\scripts\collect_dynamic_capabilities.ps1 -LicenseConfirmed
 ```
 
 默认报告写到 `%LOCALAPPDATA%\AutomotiveNetworkDebugAgent\diagnostics\canoe-capabilities.json`。采集器会创建最小临时配置和合成 BLF，检查 Offline Animation、CAPL 编译、Replay/Test/Diagnostic/Logging 清单及可用性，然后关闭 CANoe 并删除本次临时目录；它不会发送原始帧或诊断请求。
@@ -501,14 +521,14 @@ Debug Agent 使用五部分结构：
 - 当前日志输入只支持 BLF；数据库支持 `.dbc`、`.arxml` 与 `.ldf` 文件或目录。
 - Config Workspace ID 只在当前 Config MCP 进程内有效；源码清单、符号、出现位置和行偏移持久化到用户缓存目录的 SQLite。服务重启后仍需重新取得 ID，但未变化文件直接复用基础索引；变化文件按路径、大小、mtime 增量重建。查询使用加载时形成的不可变 generation，不会在 Workspace 生命期内被其他进程的更新替换。
 - 源码与 ARXML 只在完整标识符相同时自动关联；名称近似但无显式引用时不会建立语义关系。Config MCP 只返回配置/实现事实，不自动判断根因。
-- 当前 Debug Agent 按方案 A 由同一 Harness 会话直接调用两个 MCP，尚未使用独立 Subagent 上下文；Tool scope 主要依靠 Skill 规则、Tool Description 与 Eval 控制。
+- 当前 Debug Agent 由同一 Harness 会话按需调用 Trace、Config、Dynamic MCP，不使用独立 Subagent 或模型运行时；Tool scope 主要依靠 Skill、Tool Description、Runtime Policy 与 Eval 控制。
 - Dynamic MCP 每个进程只允许一个活动 Session；Session、CANoe COM 对象和运行时状态不跨进程重启持久化。
 - Dynamic 的 `auto` 始终选择离线模式。在线测量必须由用户明确提供 `.cfg`、选择 `online` 并授权对应 runtime capability；普通离线 start/reset 必须走 Offline Animation。
 - `.cfg` 影子副本只保证原始 `.cfg` 内容不被本工具修改。CANoe 配置引用的外部 CAPL、数据库、测试模块或日志路径仍是配置自身的外部资源，调用者应使用受控测试工程。
 - 原始 CAN/CAN FD 注入依赖当前配置提供 `ANDA_TransmitCanFrame(channel, arbitrationId, flags, dataHex)` CAPL Bridge；`flags` 的 bit0/bit1/bit2 分别表示 extended/FD/BRS。配置没有该函数时 Tool 明确返回不支持，不尝试隐式修改真实工程或绕过 CANoe 配置。
 - Replay、Diagnostic、Logging、Test、Bus Statistics 和部分 Network Model 能力取决于当前 CANoe 版本、许可证、配置内容与 Channel；对象不存在时返回确定性“不支持/不存在”，不模拟结果。
-- Dynamic 本轮只有 Core 与 MCP，没有 Dynamic Skill，也没有接入 Debug Skill 自动编排；这是后续多源动态调查的独立基础层。
-- Dynamic 已在本机 `Vector CANoe.CAN.LIN /pro 14.4.13` 上完成安全离线实机验收。项目固定使用 `py-canoe==26.4.1`，并包含 CANoe 14 COM 属性大小写兼容处理；其他 CANoe 版本仍需按能力报告确认。
+- Dynamic 已提供 Harness-native Skill，并最小接入 Debug；只有明确运行时假设才进入 CANoe 实验。
+- Dynamic 已在本机 `Vector CANoe.CAN.LIN /pro 14.4.13` 上完成安全离线实机验收；Active Virtual CAN 验收通过项与 pending 项见 `docs/第9轮开发日志.md`。项目固定使用 `py-canoe==26.4.1`。
 - Custom Subagent 是未来 Codex 增强方向，当前 Plugin 没有 `.codex/agents/*.toml`、Python DebugAgent 或独立模型运行时。
 - 已使用真实大 BLF、CAN/LIN 数据库目录和明确 ARXML 做加载与查询能力验收；真实数据只在本机读取且不进入仓库。该验收不等同于对具体故障做诊断。
 - 安装或升级插件后必须新建会话，旧会话不会动态获得新 Skill 或 MCP Tool。
