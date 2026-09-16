@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import gc
 import platform
 import subprocess
 import time
@@ -114,6 +115,7 @@ class PyCanoeBackend:
         self._mode_verified = False
         self._instance_mode = "managed"
         self._owns_canoe_process = False
+        self._owned_process_ids: set[int] = set()
         self._can_quit = False
         self._measurement_started_by_session = False
         self._network_database: NetworkDatabase | None = None
@@ -291,6 +293,7 @@ class PyCanoeBackend:
             raise DynamicStateError(
                 "managed 模式启动后无法唯一确认 CANoe 进程所有权；拒绝继续"
             )
+        self._owned_process_ids = set(after) - set(before)
 
         self._version = self._canoe.get_canoe_version_info()
         if not configuration_path:
@@ -463,22 +466,48 @@ class PyCanoeBackend:
         try:
             result = self._canoe.compile_all_capl_nodes(wait_time=1)
             if result is None:
-                raise DynamicBackendError("CANoe 未返回 CAPL CompileResult")
-            result_code = int(result.result)
-            return {
-                "success": result_code == 0,
-                "result_code": result_code,
-                "error_count": 0 if result_code == 0 else None,
-                "warning_count": None,
-                "error": str(result.error_message or "")[:2000],
-                "node": str(result.node_name or "")[:500],
-                "source_file": str(result.source_file or "")[:1000],
-                "write_window": self.read_write_window(write_line_limit, 8000),
-            }
-        except DynamicBackendError:
-            raise
+                payload = self._last_capl_compile_result()
+                # py-canoe 已吞掉底层异常时，即便最后一次 CompileResult 恰好为
+                # 成功也不能把本次调用判为成功，否则可能复用上一次的陈旧结果。
+                payload["success"] = False
+                payload["adapter_error"] = "py-canoe compile_all_capl_nodes 返回 None"
+                payload["write_window"] = self.read_write_window(write_line_limit, 8000)
+                return payload
+            payload = self._capl_compile_result_payload(result)
+            payload["write_window"] = self.read_write_window(write_line_limit, 8000)
+            return payload
         except Exception as exc:
             raise DynamicBackendError(f"CAPL 编译失败：{exc}") from exc
+
+    def _last_capl_compile_result(self) -> dict[str, Any]:
+        """即使 py-canoe 吞掉 Compile 异常，也回读 CANoe 最后一次编译结果。"""
+        try:
+            result = self._canoe.application.capl.compile_result
+            return self._capl_compile_result_payload(result)
+        except Exception as exc:  # noqa: BLE001 - 不覆盖原始编译失败
+            return {
+                "success": False,
+                "result_code": None,
+                "error_count": None,
+                "warning_count": None,
+                "error": "CANoe CompileResult 无法读取",
+                "node": "",
+                "source_file": "",
+                "compile_result_error": _exception_details(exc),
+            }
+
+    @staticmethod
+    def _capl_compile_result_payload(result: Any) -> dict[str, Any]:
+        result_code = int(result.result)
+        return {
+            "success": result_code == 0,
+            "result_code": result_code,
+            "error_count": 0 if result_code == 0 else None,
+            "warning_count": None,
+            "error": str(result.error_message or "")[:2000],
+            "node": str(result.node_name or "")[:500],
+            "source_file": str(result.source_file or "")[:1000],
+        }
 
     def control_measurement(self, action: str) -> dict[str, Any]:
         was_running = bool(self._canoe.get_measurement_running_status())
@@ -963,11 +992,16 @@ class PyCanoeBackend:
         payload_hex = data.hex().upper()
         for index in range(count):
             try:
-                function.Call(channel, arbitration_id, flags, payload_hex)
+                accepted = function.Call(channel, arbitration_id, flags, payload_hex)
             except Exception as exc:
                 raise DynamicBackendError(
                     f"Raw CAN Frame 第 {index + 1}/{count} 次发送失败：{exc}"
                 ) from exc
+            if not bool(accepted):
+                raise DynamicUnsupportedError(
+                    "Raw CAN CAPL Bridge 拒绝发送参数；请核对 Channel、ID、"
+                    "Classic/FD、BRS 与 Payload 长度"
+                )
             if index + 1 < count:
                 self._wait(interval_ms / 1000)
         return {
@@ -1216,6 +1250,7 @@ class PyCanoeBackend:
 
     def close(self) -> dict[str, Any]:
         errors = []
+        event_sinks: list[Any] = []
         if self._canoe is None or self._canoe.application is None:
             errors.extend(self._release_process_resources())
             return {"closed": not errors, "cleanup_errors": errors}
@@ -1257,6 +1292,8 @@ class PyCanoeBackend:
                 {"operation": "stop_measurement", "error": _exception_details(exc)}
             )
         try:
+            application = self._canoe.application
+            event_sinks = _event_sink_disconnect_targets(application, include_gc=True)
             if self._can_quit:
                 quit_ok = bool(self._canoe.quit(timeout=30))
                 if not quit_ok:
@@ -1266,15 +1303,26 @@ class PyCanoeBackend:
                             "error": {"message": "CANoe quit returned false"},
                         }
                     )
+                elif not _wait_for_canoe_process_exit(self._owned_process_ids, 15):
+                    errors.append(
+                        {
+                            "operation": "wait_for_process_exit",
+                            "error": {
+                                "message": "CANoe Quit 已返回，但自有进程未在 15 秒内退出"
+                            },
+                        }
+                    )
             else:
-                application = self._canoe.application
                 application._release_event_sinks()
                 self._canoe._reset_application()
         except Exception as exc:  # noqa: BLE001
             operation = "quit" if self._can_quit else "release_attachment"
             errors.append({"operation": operation, "error": _exception_details(exc)})
         finally:
+            _disarm_event_sink_targets(event_sinks)
+            event_sinks.clear()
             self._canoe = None
+            self._owned_process_ids.clear()
             errors.extend(self._release_process_resources())
         return {"closed": not errors, "cleanup_errors": errors}
 
@@ -1294,14 +1342,11 @@ class PyCanoeBackend:
             errors.append(
                 {"operation": "close_log_handler", "error": _exception_details(exc)}
             )
-        try:
-            import pythoncom
-
-            pythoncom.CoUninitialize()
-        except Exception as exc:  # noqa: BLE001 - 兼容未初始化 COM 的异常路径
-            errors.append(
-                {"operation": "com_uninitialize", "error": _exception_details(exc)}
-            )
+        # BackendWorker 在 close 返回后立即结束专用 STA 线程。这里不显式调用
+        # CoUninitialize：CANoe 退出后 pywin32 仍可能持有失效的事件 Gateway，
+        # CoUninitialize 会在原生层释放它们并向 stderr 打印 Windows fatal exception。
+        # 让专用线程退出时由 Windows 回收该 apartment，避免在长驻主进程中触发
+        # 不可捕获的原生异常输出。
         return errors
 
 
@@ -1346,6 +1391,118 @@ def _has_active_canoe_application() -> bool:
         raise DynamicStateError(
             f"无法可靠查询 CANoe COM 活动实例，拒绝判断所有权：{exc}"
         ) from exc
+
+
+def _wait_for_canoe_process_exit(process_ids: set[int], timeout: float) -> bool:
+    """等待本 Session 启动的 CANoe PID 真正退出，避免下一 Session 竞态。"""
+    if not process_ids:
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process_ids.isdisjoint(_canoe_processes()):
+            return True
+        time.sleep(0.1)
+    return process_ids.isdisjoint(_canoe_processes())
+
+
+def _is_canoe_event_sink(target: Any) -> bool:
+    """只识别 CANoe/py-canoe 生成的 pywin32 事件 Gateway。"""
+    try:
+        identity = " ".join(
+            f"{base.__module__}.{base.__name__}" for base in type(target).__mro__
+        )
+    except (AttributeError, TypeError):
+        return False
+    normalized = identity.upper().replace("-", "").replace("_", "")
+    return (
+        "PYCANOE." in identity.upper().replace("_", "")
+        or "7F31DEB05BCC11D3856200105A3E017B" in normalized
+    )
+
+
+def _event_sink_disconnect_targets(
+    root: Any, *, include_gc: bool = False
+) -> list[Any]:
+    """收集 pywin32 Connection Point，且不在 CANoe Quit 前断开事件。"""
+    visited: set[int] = set()
+    targets: list[Any] = []
+
+    def walk(value: Any) -> None:
+        if value is None or id(value) in visited:
+            return
+        visited.add(id(value))
+        if isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                walk(item)
+            return
+        try:
+            attributes = vars(value)
+        except TypeError:
+            return
+        target = attributes.get("_obj_", value)
+        try:
+            target_attributes = vars(target)
+        except TypeError:
+            target_attributes = {}
+        if "_olecp" in target_attributes:
+            targets.append(target)
+        # 普通 COM proxy 不属于 Python 所有的对象图，不能继续递归；但事件
+        # Gateway 同时拥有 _oleobj_ 与 _olecp，所以上面的识别必须先执行。
+        if hasattr(value, "_oleobj_"):
+            return
+        for name, item in tuple(attributes.items()):
+            if name not in {"com_object", "_olecp", "_olecp_cookie"}:
+                walk(item)
+
+    walk(root)
+    if include_gc:
+        # py-canoe 某些集合会创建未保存在 Application 对象图中的临时
+        # WithEvents Gateway。它们仍由 pywin32 循环引用持有，需要在 Quit
+        # 前保留引用、Quit 后失活，避免稍后在非 COM 线程中执行 __del__。
+        for value in gc.get_objects():
+            try:
+                attributes = vars(value)
+            except TypeError:
+                continue
+            target = attributes.get("_obj_", value)
+            try:
+                target_attributes = vars(target)
+            except TypeError:
+                continue
+            if (
+                "_olecp" in target_attributes
+                and _is_canoe_event_sink(target)
+                and all(existing is not target for existing in targets)
+            ):
+                targets.append(target)
+    return targets
+
+
+def _disarm_event_sink_targets(targets: list[Any]) -> int:
+    """使已完成 CANoe Quit 的 Connection Point 析构不再调用 Unadvise。"""
+    disarmed = 0
+    for target in targets:
+        try:
+            attributes = vars(target)
+        except TypeError:
+            continue
+        if "_olecp" not in attributes:
+            continue
+        attributes["_olecp"] = None
+        attributes["_olecp_cookie"] = None
+        if "APP_COM_OBJ" in attributes:
+            attributes["APP_COM_OBJ"] = None
+        disarmed += 1
+    return disarmed
+
+
+def _disarm_event_sink_disconnects(root: Any) -> int:
+    """兼容测试与非退出场景：立即失活 root 下的 pywin32 事件连接。"""
+    return _disarm_event_sink_targets(_event_sink_disconnect_targets(root))
 
 
 __all__ = ["PyCanoeBackend", "_exception_details"]

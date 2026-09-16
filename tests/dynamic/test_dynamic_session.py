@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import get_ident
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -12,9 +13,14 @@ from anda.common.errors import (
     DynamicInputError,
     DynamicPolicyError,
     DynamicStateError,
+    DynamicUnsupportedError,
     TraceNotFoundError,
 )
-from anda.dynamic.pycanoe import PyCanoeBackend, _bounded_value
+from anda.dynamic.pycanoe import (
+    PyCanoeBackend,
+    _bounded_value,
+    _disarm_event_sink_disconnects,
+)
 from anda.dynamic.session import DynamicSessionManager
 
 
@@ -106,6 +112,89 @@ def test_arbitrary_backend_values_are_bounded():
     assert len(bounded[0]["values"]) == 100
 
 
+def test_compile_capl_recovers_last_result_when_py_canoe_returns_none():
+    class Result:
+        result = 1
+        error_message = "line 42: syntax error"
+        node_name = "ECU 3"
+        source_file = "system_variables.can"
+
+    class Canoe:
+        def __init__(self) -> None:
+            self.application = SimpleNamespace(
+                capl=SimpleNamespace(compile_result=Result())
+            )
+
+        @staticmethod
+        def compile_all_capl_nodes(wait_time: int):
+            assert wait_time == 1
+            return None
+
+    backend = PyCanoeBackend()
+    backend._canoe = Canoe()
+    backend.read_write_window = lambda *_: {"text": "compiler output"}
+
+    result = backend.compile_capl()
+
+    assert result["success"] is False
+    assert result["error"] == "line 42: syntax error"
+    assert result["node"] == "ECU 3"
+    assert result["source_file"] == "system_variables.can"
+    assert result["adapter_error"] == "py-canoe compile_all_capl_nodes 返回 None"
+
+
+def test_compile_capl_never_reports_success_when_adapter_returns_none():
+    result = SimpleNamespace(
+        result=0,
+        error_message="",
+        node_name="",
+        source_file="",
+    )
+    backend = PyCanoeBackend()
+    backend._canoe = SimpleNamespace(
+        compile_all_capl_nodes=lambda wait_time: None,
+        application=SimpleNamespace(
+            capl=SimpleNamespace(compile_result=result)
+        ),
+    )
+    backend.read_write_window = lambda *_: {"text": ""}
+
+    compiled = backend.compile_capl()
+
+    assert compiled["result_code"] == 0
+    assert compiled["success"] is False
+    assert compiled["adapter_error"] == "py-canoe compile_all_capl_nodes 返回 None"
+
+
+def test_disarm_event_sink_disconnects_neutralizes_nested_connection_points():
+    event = SimpleNamespace(
+        _oleobj_=object(),
+        _olecp=object(),
+        _olecp_cookie=17,
+        APP_COM_OBJ=object(),
+    )
+    root = SimpleNamespace(measurement=SimpleNamespace(measurement_events=event))
+
+    count = _disarm_event_sink_disconnects(root)
+
+    assert count == 1
+    assert event._olecp is None
+    assert event._olecp_cookie is None
+    assert event.APP_COM_OBJ is None
+
+
+def test_raw_frame_bridge_rejection_is_reported():
+    function = SimpleNamespace(ParameterCount=4, Call=lambda *_: 0)
+    capl = SimpleNamespace(GetFunction=lambda name: function)
+    backend = PyCanoeBackend()
+    backend._canoe = SimpleNamespace(
+        application=SimpleNamespace(com_object=SimpleNamespace(CAPL=capl))
+    )
+
+    with pytest.raises(DynamicUnsupportedError, match="CAPL Bridge 拒绝"):
+        backend.transmit_can_frame(1, 0x555, b"\xA5", False, False, False, 1, 0)
+
+
 def test_attached_backend_close_releases_reference_without_quit(monkeypatch):
     class Application:
         def __init__(self) -> None:
@@ -118,11 +207,16 @@ def test_attached_backend_close_releases_reference_without_quit(monkeypatch):
         def __init__(self) -> None:
             self.application = Application()
             self.quit_called = False
+            self.event = SimpleNamespace(
+                _oleobj_=object(), _olecp=object(), _olecp_cookie=17
+            )
+            self.application.events = self.event
 
         def get_measurement_running_status(self) -> bool:
             return False
 
         def quit(self, timeout: int) -> bool:
+            assert self.event._olecp is not None
             self.quit_called = True
             return True
 
@@ -142,6 +236,40 @@ def test_attached_backend_close_releases_reference_without_quit(monkeypatch):
     assert result["closed"] is True
     assert application.released is True
     assert canoe.quit_called is False
+    assert canoe.event._olecp is None
+
+
+def test_managed_backend_close_disarms_events_only_after_quit(monkeypatch):
+    event = SimpleNamespace(_oleobj_=object(), _olecp=object(), _olecp_cookie=17)
+
+    class Canoe:
+        def __init__(self) -> None:
+            self.application = SimpleNamespace(events=event)
+            self.quit_called = False
+
+        @staticmethod
+        def get_measurement_running_status() -> bool:
+            return False
+
+        def quit(self, timeout: int) -> bool:
+            assert timeout == 30
+            assert event._olecp is not None
+            self.quit_called = True
+            self.application = None
+            return True
+
+    backend = PyCanoeBackend()
+    canoe = Canoe()
+    backend._canoe = canoe
+    backend._can_quit = True
+    monkeypatch.setattr(backend, "_release_process_resources", list)
+
+    result = backend.close()
+
+    assert result["closed"] is True
+    assert canoe.quit_called is True
+    assert event._olecp is None
+    assert event._olecp_cookie is None
 
 
 def test_cfg_only_network_model_reads_messages_and_signals_from_loaded_database(

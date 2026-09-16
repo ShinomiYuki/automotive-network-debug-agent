@@ -1,7 +1,8 @@
-"""显式开启的 CANoe Active Smoke；只使用复制后的公开演示资产与 Virtual CAN。"""
+"""显式开启的 CANoe Active Smoke；Online 用例保留 cfg 的真实硬件绑定。"""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -18,7 +19,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 CAPL_BRIDGE = r"""
-
 long ANDA_HexNibble(char value)
 {
   if (value >= '0' && value <= '9') return value - '0';
@@ -27,27 +27,53 @@ long ANDA_HexNibble(char value)
   return -1;
 }
 
+long ANDA_DlcFromLength(long payloadLength)
+{
+  if (payloadLength <= 8) return payloadLength;
+  if (payloadLength <= 12) return 9;
+  if (payloadLength <= 16) return 10;
+  if (payloadLength <= 20) return 11;
+  if (payloadLength <= 24) return 12;
+  if (payloadLength <= 32) return 13;
+  if (payloadLength <= 48) return 14;
+  if (payloadLength <= 64) return 15;
+  return -1;
+}
+
 long ANDA_TransmitCanFrame(long channel, long arbitrationId, long flags, char dataHex[])
 {
-  message * tx;
   long index;
   long high;
   long low;
   long payloadLength;
+  long dlc;
 
-  if (channel != 1 || flags != 0) return 0;
+  if (channel < 1 || channel > 255) return 0;
+  if ((flags & 4) != 0 && (flags & 2) == 0) return 0;
   payloadLength = strlen(dataHex) / 2;
-  if (payloadLength < 0 || payloadLength > 8) return 0;
-  tx.id = arbitrationId;
-  tx.dlc = payloadLength;
+  dlc = ANDA_DlcFromLength(payloadLength);
+  if (dlc < 0) return 0;
+  if ((flags & 2) == 0 && payloadLength > 8) return 0;
+  if ((flags & 1) != 0)
+  {
+    ANDA_RawTx.id = mkExtId(arbitrationId);
+  }
+  else
+  {
+    ANDA_RawTx.id = arbitrationId;
+  }
+  ANDA_RawTx.CAN = channel;
+  ANDA_RawTx.FDF = (flags & 2) / 2;
+  ANDA_RawTx.BRS = (flags & 4) / 4;
+  ANDA_RawTx.dlc = dlc;
   for (index = 0; index < payloadLength; index++)
   {
     high = ANDA_HexNibble(dataHex[index * 2]);
     low = ANDA_HexNibble(dataHex[index * 2 + 1]);
     if (high < 0 || low < 0) return 0;
-    tx.byte(index) = high * 16 + low;
+    ANDA_RawTx.byte(index) = high * 16 + low;
   }
-  output(tx);
+  output(ANDA_RawTx);
   return 1;
 }
 
@@ -59,7 +85,7 @@ on message 0x555
 """
 
 
-def _copy_safe_assets(tmp_path: Path) -> Path:
+def _copy_safe_assets(tmp_path: Path, *, include_capl_bridge: bool = True) -> Path:
     source_value = os.environ.get("ANDA_CANOE_SMOKE_ASSET_ROOT")
     if not source_value:
         pytest.skip("未提供 ANDA_CANOE_SMOKE_ASSET_ROOT")
@@ -74,13 +100,17 @@ def _copy_safe_assets(tmp_path: Path) -> Path:
         pytest.skip("安全演示资产不完整")
     target = tmp_path / "canoe-safe-assets"
     shutil.copytree(source, target)
-    capl = target / "Nodes" / "system_variables.can"
-    existing = capl.read_text(encoding="cp1252")
-    capl.write_text(existing + CAPL_BRIDGE, encoding="cp1252")
+    if include_capl_bridge:
+        capl = target / "Nodes" / "system_variables.can"
+        existing = capl.read_text(encoding="cp1252")
+        marker = "variables\n{"
+        assert marker in existing
+        existing = existing.replace(marker, marker + "\n  message *ANDA_RawTx;", 1)
+        capl.write_text(existing + CAPL_BRIDGE, encoding="cp1252")
     return target
 
 
-def test_canoe_active_virtual_can_smoke(tmp_path: Path):
+def test_canoe_active_online_hardware_smoke(tmp_path: Path):
     global _VIEW_ONLY_DETECTED
     assets = _copy_safe_assets(tmp_path)
     manager = DynamicSessionManager(temp_root=tmp_path / "sessions")
@@ -108,7 +138,10 @@ def test_canoe_active_virtual_can_smoke(tmp_path: Path):
             pytest.skip("CANoe 当前为 View Only，Active Smoke pending")
         assert created["owns_canoe_process"] is True
         assert created["can_quit"] is True
-        assert manager.compile_capl(session_id)["success"] is True
+        compiled = manager.compile_capl(session_id)
+        assert compiled["success"] is True, json.dumps(
+            compiled, ensure_ascii=False, default=str
+        )
         manager.control_measurement(session_id, "start")
         assert (
             manager.wait_runtime_event(session_id, "measurement_started", 10)[
@@ -183,7 +216,7 @@ def test_canoe_active_virtual_can_smoke(tmp_path: Path):
 def test_canoe_active_test_module_smoke(tmp_path: Path):
     if _VIEW_ONLY_DETECTED:
         pytest.skip("本轮已确认 CANoe 为 View Only，Test Module Smoke pending")
-    assets = _copy_safe_assets(tmp_path)
+    assets = _copy_safe_assets(tmp_path, include_capl_bridge=False)
     manager = DynamicSessionManager(temp_root=tmp_path / "test-sessions")
     created = manager.create_dynamic_session(
         configuration_path=str(assets / "demo_test_setup.cfg"),
@@ -196,6 +229,10 @@ def test_canoe_active_test_module_smoke(tmp_path: Path):
     try:
         if created["backend"]["license_view_only"]:
             pytest.skip("CANoe 当前为 View Only，Test Module Smoke pending")
+        compiled = manager.compile_capl(session_id)
+        assert compiled["success"] is True, json.dumps(
+            compiled, ensure_ascii=False, default=str
+        )
         manager.control_measurement(session_id, "start")
         listed = manager.list_tests(session_id)
         assert listed["module_count"] >= 1
