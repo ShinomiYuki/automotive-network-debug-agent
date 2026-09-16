@@ -272,76 +272,79 @@ python -m anda.mcp.dynamic.server
 
 ### Trace Tool
 
-| Tool                 | 用途                                             |
-| -------------------- | ------------------------------------------------ |
-| `get_trace_health`   | 检查 Trace MCP、BLF/DBC/LDF 后端和插件注册状态 |
-| `load_trace`         | 启动 BLF 与可选数据库后台索引，立即返回 `trace_id` |
-| `get_trace_load_status` | 等待或查询索引进度，不重复启动相同加载          |
-| `get_trace_summary`  | 获取时间范围、帧数、Channel、CAN/CAN FD/LIN 摘要 |
-| `set_channel_mapping` | 登记用户明确提供的逻辑网段、分析 Channel 与 ECU Channel 映射 |
-| `find_messages`      | 按总线类型、帧 ID、Channel、时间范围查询有限原始帧 |
-| `get_message_timing` | 获取帧数、周期、最大间隔与抖动统计               |
-| `analyze_routed_signal_timeout` | 一次关联源 CAN 停止与多个目标 LIN Channel 的 timeout 时序 |
-| `search_database`    | 按 Message/Signal 名搜索至多 20 个数据库导航候选 |
-| `decode_signal`      | 使用 DBC/ARXML/LDF 解码指定 CAN/LIN 信号并返回有限样本 |
+
+| Tool                            | 用途                                                         |
+| --------------------------------- | -------------------------------------------------------------- |
+| `get_trace_health`              | 检查 Trace MCP、BLF/DBC/LDF 后端和插件注册状态               |
+| `load_trace`                    | 启动 BLF 与可选数据库后台索引，立即返回`trace_id`            |
+| `get_trace_load_status`         | 等待或查询索引进度，不重复启动相同加载                       |
+| `get_trace_summary`             | 获取时间范围、帧数、Channel、CAN/CAN FD/LIN 摘要             |
+| `set_channel_mapping`           | 登记用户明确提供的逻辑网段、分析 Channel 与 ECU Channel 映射 |
+| `find_messages`                 | 按总线类型、帧 ID、Channel、时间范围查询有限原始帧           |
+| `get_message_timing`            | 获取帧数、周期、最大间隔与抖动统计                           |
+| `analyze_routed_signal_timeout` | 一次关联源 CAN 停止与多个目标 LIN Channel 的 timeout 时序    |
+| `search_database`               | 按 Message/Signal 名搜索至多 20 个数据库导航候选             |
+| `decode_signal`                 | 使用 DBC/ARXML/LDF 解码指定 CAN/LIN 信号并返回有限样本       |
 
 ### Config Tool
 
-| Tool | 用途 |
-| --- | --- |
-| `get_config_health` | 检查 Config MCP、ARXML/SQLite 后端和插件注册状态 |
-| `load_config_workspace` | 启动工程和明确 ARXML 的后台索引，立即返回 `workspace_id` |
-| `get_config_load_status` | 等待或查询工程索引状态，不重复启动相同加载 |
-| `get_project_index_status` | 查看 SQLite 缓存、增量复用和失效依据 |
-| `plan_source_search` | 先按问题类型、模块和文件名规划最小源码范围 |
-| `search_source_evidence` | 批量查询完整标识符并返回有界源码证据与负向范围 |
-| `read_source_lines` | 按行 byte offset 批量读取明确范围，避免整文件加载 |
-| `search_config_symbol` | 查询 Message、CAN ID、PDU、配置对象或源码符号 |
-| `search_source_symbol` | 按完整名、前缀或子串搜索工程源码标识符 |
-| `inspect_source_symbol` | 以完整源码标识符为入口，查看角色、上下文和同名配置证据 |
-| `trace_message_route` | 追踪 Message/CAN ID、Source PDU、Routing Path 与 Destination |
-| `inspect_pdu` | 查看 PDU 定义、网段、Message 和路由关联 |
-| `inspect_communication` | 汇总 Message/PDU 的 CanIf、Com、时序、模式、超时和源码证据 |
-| `trace_signal_gateway` | 追踪 Com Signal、所在 I-PDU 和 ComGwMapping |
-| `inspect_ipdu_group` | 查看 I-PDU Group 成员与 BswM/ComM 直接控制引用 |
-| `trace_autosar_runtime_chain` | 输出跨 CanIf/PduR/Com/LinIf/OS/BswM/CDD 的静态链与反证 |
-| `find_source_context` | 定位 C/H/C++ 完整标识符并返回有限上下文 |
-| `create_investigation_bundle` | 在用户明确目录创建结构化调查证据包 |
-| `record_investigation_evidence` | 分类追加或替换 Trace/Config/源码/反证证据 |
-| `update_investigation_state` | 更新候选假设与开放问题快照 |
-| `get_investigation_summary` | 核对证据数量和有限样本 |
-| `export_investigation_markdown` | 确定性导出 Markdown 报告；当前不提供 PDF 导出 |
+
+| Tool                            | 用途                                                         |
+| --------------------------------- | -------------------------------------------------------------- |
+| `get_config_health`             | 检查 Config MCP、ARXML/SQLite 后端和插件注册状态             |
+| `load_config_workspace`         | 启动工程和明确 ARXML 的后台索引，立即返回`workspace_id`      |
+| `get_config_load_status`        | 等待或查询工程索引状态，不重复启动相同加载                   |
+| `get_project_index_status`      | 查看 SQLite 缓存、增量复用和失效依据                         |
+| `plan_source_search`            | 先按问题类型、模块和文件名规划最小源码范围                   |
+| `search_source_evidence`        | 批量查询完整标识符并返回有界源码证据与负向范围               |
+| `read_source_lines`             | 按行 byte offset 批量读取明确范围，避免整文件加载            |
+| `search_config_symbol`          | 查询 Message、CAN ID、PDU、配置对象或源码符号                |
+| `search_source_symbol`          | 按完整名、前缀或子串搜索工程源码标识符                       |
+| `inspect_source_symbol`         | 以完整源码标识符为入口，查看角色、上下文和同名配置证据       |
+| `trace_message_route`           | 追踪 Message/CAN ID、Source PDU、Routing Path 与 Destination |
+| `inspect_pdu`                   | 查看 PDU 定义、网段、Message 和路由关联                      |
+| `inspect_communication`         | 汇总 Message/PDU 的 CanIf、Com、时序、模式、超时和源码证据   |
+| `trace_signal_gateway`          | 追踪 Com Signal、所在 I-PDU 和 ComGwMapping                  |
+| `inspect_ipdu_group`            | 查看 I-PDU Group 成员与 BswM/ComM 直接控制引用               |
+| `trace_autosar_runtime_chain`   | 输出跨 CanIf/PduR/Com/LinIf/OS/BswM/CDD 的静态链与反证       |
+| `find_source_context`           | 定位 C/H/C++ 完整标识符并返回有限上下文                      |
+| `create_investigation_bundle`   | 在用户明确目录创建结构化调查证据包                           |
+| `record_investigation_evidence` | 分类追加或替换 Trace/Config/源码/反证证据                    |
+| `update_investigation_state`    | 更新候选假设与开放问题快照                                   |
+| `get_investigation_summary`     | 核对证据数量和有限样本                                       |
+| `export_investigation_markdown` | 确定性导出 Markdown 报告；当前不提供 PDF 导出                |
 
 ### Dynamic Tool
 
-| Tool | 副作用等级 | 用途 |
-| --- | --- | --- |
-| `get_dynamic_health` | `READ_ONLY` | 静态检查 Windows、CANoe、COM 与 py-canoe，不启动 CANoe 或占用许可证 |
-| `create_dynamic_session` | `LOCAL_MUTATION` | 创建 managed 临时/影子配置，或显式 attached 到唯一活动 CANoe |
-| `get_dynamic_status` | `READ_ONLY` | 查看模式、实例所有权、退出权限、策略、CANoe 与运行状态 |
-| `close_dynamic_session` | `RUNTIME_MUTATION` | 清理本 Session；仅 managed 所有者退出 CANoe，attached 只释放引用 |
-| `compile_capl` | `LOCAL_MUTATION` | 编译当前配置 CAPL 并返回有界 Write Window 证据 |
-| `control_measurement` | `RUNTIME_MUTATION` | 对在线 Session 执行 start/stop/reset；离线 start/reset 被拒绝 |
-| `control_offline_animation` | `RUNTIME_MUTATION` | 对离线 Session 执行 start/pause/step/reset/stop |
-| `wait_runtime_event` | `READ_ONLY` | 有界等待 Measurement/Animation 状态事件 |
-| `observe_bus_window` | `READ_ONLY` | 直接复用 Trace Core 查询明确 BLF 时间窗和可选 CAN ID |
-| `get_signal` | `READ_ONLY` | 读取 CAN/LIN Signal 的物理值或原始值 |
-| `get_variable` | `READ_ONLY` | 读取 System Variable 或 Environment Variable |
-| `read_write_window` | `READ_ONLY` | 读取有行数和字符数上限的 CANoe Write Window |
-| `get_bus_statistics` | `READ_ONLY` | 读取指定 Channel 可用的 CANoe Bus Statistics |
-| `inspect_network_model` | `READ_ONLY` | 有界浏览当前 cfg 的 Database、Node、Message 或 Signal |
-| `get_debug_snapshot` | `READ_ONLY` | 一次读取有限 Signal、Variable、状态和 Write Window |
-| `set_signal` | `RUNTIME_MUTATION` | 在策略允许时设置 Signal 值 |
-| `set_variable` | `RUNTIME_MUTATION` | 在策略允许时设置 System/Environment Variable |
-| `call_capl_function` | `RUNTIME_MUTATION` | 调用配置中已经存在且参数数量匹配的 CAPL Function |
-| `transmit_can_frame` | `BUS_ACTIVE` | 通过配置内 `ANDA_TransmitCanFrame` Bridge 有界注入 Classic CAN/CAN FD |
-| `send_diagnostic_request` | `BUS_ACTIVE` | 向明确 ECU Qualifier 发送一次有超时上限的诊断请求 |
-| `configure_replay` | `LOCAL_MUTATION` | 在影子/临时配置中配置 Replay Block 和源文件 |
-| `control_replay` | `BUS_ACTIVE` | 对明确 Replay Block 执行 start/stop/reset |
-| `manage_logging` | `RUNTIME_MUTATION` | 有界列出、配置、启动或停止 Logging Block |
-| `list_tests` | `READ_ONLY` | 列出当前配置可见的 Test Environment/Module |
-| `start_test` | `RUNTIME_MUTATION` | 启动明确的测试范围或测试项 |
-| `get_test_result` | `READ_ONLY` | 读取有限测试状态或结果 |
+
+| Tool                        | 副作用等级         | 用途                                                                 |
+| ----------------------------- | -------------------- | ---------------------------------------------------------------------- |
+| `get_dynamic_health`        | `READ_ONLY`        | 静态检查 Windows、CANoe、COM 与 py-canoe，不启动 CANoe 或占用许可证  |
+| `create_dynamic_session`    | `LOCAL_MUTATION`   | 创建 managed 临时/影子配置，或显式 attached 到唯一活动 CANoe         |
+| `get_dynamic_status`        | `READ_ONLY`        | 查看模式、实例所有权、退出权限、策略、CANoe 与运行状态               |
+| `close_dynamic_session`     | `RUNTIME_MUTATION` | 清理本 Session；仅 managed 所有者退出 CANoe，attached 只释放引用     |
+| `compile_capl`              | `LOCAL_MUTATION`   | 编译当前配置 CAPL 并返回有界 Write Window 证据                       |
+| `control_measurement`       | `RUNTIME_MUTATION` | 对在线 Session 执行 start/stop/reset；离线 start/reset 被拒绝        |
+| `control_offline_animation` | `RUNTIME_MUTATION` | 对离线 Session 执行 start/pause/step/reset/stop                      |
+| `wait_runtime_event`        | `READ_ONLY`        | 有界等待 Measurement/Animation 状态事件                              |
+| `observe_bus_window`        | `READ_ONLY`        | 直接复用 Trace Core 查询明确 BLF 时间窗和可选 CAN ID                 |
+| `get_signal`                | `READ_ONLY`        | 读取 CAN/LIN Signal 的物理值或原始值                                 |
+| `get_variable`              | `READ_ONLY`        | 读取 System Variable 或 Environment Variable                         |
+| `read_write_window`         | `READ_ONLY`        | 读取有行数和字符数上限的 CANoe Write Window                          |
+| `get_bus_statistics`        | `READ_ONLY`        | 读取指定 Channel 可用的 CANoe Bus Statistics                         |
+| `inspect_network_model`     | `READ_ONLY`        | 有界浏览当前 cfg 的 Database、Node、Message 或 Signal                |
+| `get_debug_snapshot`        | `READ_ONLY`        | 一次读取有限 Signal、Variable、状态和 Write Window                   |
+| `set_signal`                | `RUNTIME_MUTATION` | 在策略允许时设置 Signal 值                                           |
+| `set_variable`              | `RUNTIME_MUTATION` | 在策略允许时设置 System/Environment Variable                         |
+| `call_capl_function`        | `RUNTIME_MUTATION` | 调用配置中已经存在且参数数量匹配的 CAPL Function                     |
+| `transmit_can_frame`        | `BUS_ACTIVE`       | 通过配置内`ANDA_TransmitCanFrame` Bridge 有界注入 Classic CAN/CAN FD |
+| `send_diagnostic_request`   | `BUS_ACTIVE`       | 向明确 ECU Qualifier 发送一次有超时上限的诊断请求                    |
+| `configure_replay`          | `LOCAL_MUTATION`   | 在影子/临时配置中配置 Replay Block 和源文件                          |
+| `control_replay`            | `BUS_ACTIVE`       | 对明确 Replay Block 执行 start/stop/reset                            |
+| `manage_logging`            | `RUNTIME_MUTATION` | 有界列出、配置、启动或停止 Logging Block                             |
+| `list_tests`                | `READ_ONLY`        | 列出当前配置可见的 Test Environment/Module                           |
+| `start_test`                | `RUNTIME_MUTATION` | 启动明确的测试范围或测试项                                           |
+| `get_test_result`           | `READ_ONLY`        | 读取有限测试状态或结果                                               |
 
 ### 调用示例
 
