@@ -1466,12 +1466,13 @@ def _event_sink_disconnect_targets(
         for value in gc.get_objects():
             try:
                 attributes = vars(value)
-            except TypeError:
+            except (TypeError, RuntimeError):
+                # 无关库的内部对象可能在读取 __dict__ 时拒绝访问。
                 continue
             target = attributes.get("_obj_", value)
             try:
                 target_attributes = vars(target)
-            except TypeError:
+            except (TypeError, RuntimeError):
                 continue
             if (
                 "_olecp" in target_attributes

@@ -95,6 +95,7 @@ def test_plugin_packages_skill_and_native_stdio_mcp_without_model_runtime():
         "./plugins/automotive-network-debug-agent"
     )
     assert set(mcp_manifest["mcpServers"]) == {
+        "automotive-tsmaster",
         "automotive-trace",
         "automotive-config",
         "automotive-dynamic",

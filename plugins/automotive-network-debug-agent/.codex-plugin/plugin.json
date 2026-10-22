@@ -23,6 +23,7 @@
     "source-code",
     "configuration",
     "canoe",
+    "tsmaster",
     "dynamic-verification",
     "mcp"
   ],
@@ -31,7 +32,7 @@
   "interface": {
     "displayName": "Automotive Network Debug Agent",
     "shortDescription": "\u8054\u5408 Trace\u3001\u5de5\u7a0b\u914d\u7f6e\u4e0e CANoe \u52a8\u6001\u8bc1\u636e\u8c03\u67e5\u6c7d\u8f66\u7f51\u7edc\u6545\u969c",
-    "longDescription": "\u5728\u540c\u4e00 Codex \u63d2\u4ef6\u5185\u63d0\u4f9b Trace Analysis\u3001Config Analysis\u3001Dynamic Verification \u548c Debug Analysis \u56db\u4e2a Harness-native Skill\uff0c\u4ee5\u53ca\u672c\u5730 Trace\u3001Config\u3001Dynamic \u4e09\u4e2a MCP\u3002\u8c03\u67e5 BLF/DBC/LDF \u4e2d CAN/CAN FD/LIN \u5b9e\u9645\u73b0\u8c61\u3001\u5de5\u7a0b\u6e90\u7801\u4e0e\u53ef\u9009 ARXML \u4e2d\u7684\u786e\u5b9a\u6027\u914d\u7f6e\u4e8b\u5b9e\uff0c\u5e76\u901a\u8fc7\u53d7\u63a7 CANoe Session \u5bf9\u660e\u786e\u8fd0\u884c\u65f6\u5047\u8bbe\u505a\u6700\u5c0f\u52a8\u6001\u5b9e\u9a8c\u3002",
+    "longDescription": "提供 Trace Analysis、Config Analysis、Dynamic Verification 和 Debug Analysis 四个 Harness-native Skill，以及本地 Trace、Config、Dynamic、TSMaster 四个 MCP。调查日志、工程源码与可选 ARXML 中的确定性事实，通过受控 CANoe 会话验证运行时假设，并提供独立 TSMaster 工程的有限路由测试接口及完整测量日志检查。",
     "developerName": "ShinomiYuki",
     "category": "Developer Tools",
     "capabilities": [

@@ -14,6 +14,16 @@ PLUGIN_ROOT = ROOT / "plugins" / "automotive-network-debug-agent"
 
 
 EXPECTED_TOOLS = {
+    "automotive-tsmaster": {
+        "get_tsmaster_health",
+        "create_tsmaster_session",
+        "get_tsmaster_status",
+        "run_tsmaster_test",
+        "stop_tsmaster_test",
+        "close_tsmaster_session",
+        "analyze_tsmaster_log",
+        "get_tsmaster_result",
+    },
     "automotive-trace": {
         "get_trace_health",
         "load_trace",

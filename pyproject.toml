@@ -1,5 +1,5 @@
 # 本文件负责定义 Python 项目的基础元数据与依赖。
-# Trace、Config 与 Dynamic MCP 共享同一 Python 包；CANoe 依赖保持为可选依赖。
+# 四个 MCP 共享同一 Python 包；CANoe 与 TSMaster 依赖保持为可选依赖。
 
 [project]
 name = "automotive-network-debug-agent"
@@ -17,6 +17,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tsmaster = [
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
 canoe = [
     "py-canoe==26.4.1",
 ]

@@ -2,11 +2,17 @@
 
 **A Multi-Source Data-Driven Agent for Automotive Network Fault Diagnosis**
 
-这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供 Trace Analysis、Config Analysis、Dynamic Verification、Debug Analysis 四个 Harness-native Skill 和三个本地 MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”，Dynamic 用本机 CANoe 对候选原因做最小实验，Debug 按问题选择必要证据域。
+这是一个可安装到 Codex 的汽车网络故障调查插件。一个 Plugin 内同时提供 Trace Analysis、Config Analysis、Dynamic Verification、Debug Analysis 四个 Harness-native Skill 和四个本地 MCP：Trace 回答“测试日志中实际发生了什么”，Config 回答“工程里实际配置和实现了什么”，Dynamic 用本机 CANoe 对候选原因做最小实验，TSMaster 提供独立工程的域控路由测试接口，Debug 按问题选择必要证据域。
 
-模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC、ARXML、工程源码、CANoe 自动化和三个 MCP 均保留在本机。
+模型推理由 Harness 提供；项目不启动独立模型运行时，也不需要 API Key。BLF/DBC、ARXML、工程源码、CANoe 与 TSMaster 自动化和四个 MCP 均保留在本机。
 
 ## 当前可用能力
+
+### TSMaster 一期
+
+独立 `automotive-tsmaster` MCP 提供工程创建、保存回载、显式 DBC 与通道绑定、有限指定帧发送、源侧 BLF 在线回放和测量结束后的整帧、信号、诊断帧路由检查。仅操作本会话的独立工程，应用启动与总线连接、发送分别要求明确授权；原有 CANoe 工具契约保持不变。
+
+代码、合成 BLF/DBC 与模拟接口验证已接入。本机 2023 版已验证 COM 工程操作，但通道配置返回旧库错误 82，实物收发尚未验证。使用方法、输入示例、证据边界和台架步骤见 [TSMaster MCP 使用说明](docs/tsmaster-mcp.md)。
 
 ### Trace
 

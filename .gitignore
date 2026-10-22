@@ -29,6 +29,8 @@ input/
 
 # 本地报告输出
 output/
+reports/
+skills/
 
 # vscode配置
 .vscode/

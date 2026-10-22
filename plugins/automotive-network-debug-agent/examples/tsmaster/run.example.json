@@ -1,0 +1,54 @@
+{
+  "session_id": "REPLACE_WITH_CREATED_SESSION_ID",
+  "cases": [
+    {
+      "name": "EXAMPLE_ONLY_0x100_TO_0x200",
+      "kind": "frame",
+      "source": {
+        "network": "EXAMPLE_SOURCE",
+        "channel": 1,
+        "arbitration_id": 256,
+        "is_extended_id": false,
+        "is_fd": false,
+        "direction": "Tx"
+      },
+      "target": {
+        "network": "EXAMPLE_TARGET",
+        "channel": 2,
+        "arbitration_id": 512,
+        "is_extended_id": false,
+        "is_fd": false,
+        "direction": "Rx"
+      },
+      "window_seconds": 0.05,
+      "baseline_seconds": 0.2,
+      "minimum_matches": 1
+    }
+  ],
+  "baseline_seconds": 0.2,
+  "response_seconds": 0.1,
+  "timeout_seconds": 5,
+  "evidence_context": {
+    "capture_complete": false,
+    "direction_verified": false,
+    "isolated": false,
+    "clock_verified": false,
+    "data_frames_only_verified": false,
+    "recorded_channels": []
+  },
+  "frames": [
+    {
+      "channel": 1,
+      "arbitration_id": 256,
+      "is_extended_id": false,
+      "is_fd": false,
+      "bitrate_switch": false,
+      "data_hex": "01 02 03 04 05 06 07 08",
+      "count": 3,
+      "interval_ms": 10,
+      "purpose": "stimulus"
+    }
+  ],
+  "replay": null,
+  "bus_authorized": false
+}
