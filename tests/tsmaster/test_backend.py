@@ -143,6 +143,22 @@ def test_com_mapping_void_success_and_database_out_id_zero_are_valid(
     )
     records = {}
     configured_rates = []
+
+    def set_mapping_verbose(
+        index, kind, device_type, device_index, port, subtype, name, disabled
+    ):
+        records[index] = SimpleNamespace(
+            FAppName="TSMaster",
+            FAppChannelType=kind,
+            FAppChannelIndex=index,
+            FHWDeviceType=device_type,
+            FHWDeviceSubType=subtype,
+            FHWIndex=device_index,
+            FHWChannelIndex=port,
+            FHWDeviceName=name,
+            FMappingDisabled=disabled,
+        )
+
     automation.quiesce = lambda: None
     automation.app = SimpleNamespace(
         get_application_list=lambda: "TSMaster",
@@ -152,9 +168,7 @@ def test_com_mapping_void_success_and_database_out_id_zero_are_valid(
         set_lin_channel_count=lambda _: None,
         get_can_channel_count=lambda: 2,
         del_mapping=lambda *_: None,
-        set_mapping=lambda record: (
-            records.setdefault(record.FAppChannelIndex, record) and None
-        ),
+        set_mapping_verbose=set_mapping_verbose,
         get_mapping=lambda _, index: records[index],
         configure_baudrate_canfd=lambda *args: configured_rates.append(args),
     )

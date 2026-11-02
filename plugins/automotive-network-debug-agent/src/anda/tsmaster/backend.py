@@ -212,8 +212,6 @@ class ComBackend:
         # 新建工程没有 SimpleGateway；加载工程另需明确人工审核。
 
     def configure(self, bench: Bench):
-        import win32com.client
-
         self.assert_owner()
         self.quiesce()
         self.app.set_current_application("TSMaster")
@@ -225,7 +223,6 @@ class ComBackend:
             self.app.del_mapping(0, index)
         mappings = []
         for channel in bench.channels:
-            record = win32com.client.Record("TTSMapping", self.app)
             expected = dict(
                 zip(
                     MAPPING_FIELDS,
@@ -243,9 +240,16 @@ class ComBackend:
                     strict=True,
                 )
             )
-            for name, value in expected.items():
-                setattr(record, name, value)
-            self.app.set_mapping(record)
+            self.app.set_mapping_verbose(
+                channel.logical_channel - 1,
+                0,
+                channel.device_type,
+                channel.device_index,
+                channel.device_channel,
+                channel.device_subtype,
+                channel.device_name,
+                False,
+            )
             actual = self.app.get_mapping(0, channel.logical_channel - 1)
             values = {name: getattr(actual, name) for name in MAPPING_FIELDS}
             if values != expected:
@@ -371,7 +375,6 @@ class ComBackend:
         self.com.start_logging(path)
 
     def send(self, frame: Frame):
-        import pythoncom
         import win32com.client
 
         data = bytes.fromhex(frame.data_hex)
@@ -389,10 +392,7 @@ class ComBackend:
         else:
             record.FIsRemote = False
         padded = data.ljust(64 if frame.is_fd else 8, b"\0")
-        record.FDatas = win32com.client.VARIANT(
-            pythoncom.VT_ARRAY | pythoncom.VT_I1,
-            [v if v < 128 else v - 256 for v in padded],
-        )
+        record.FDatas = tuple(v if v < 128 else v - 256 for v in padded)
         if frame.is_fd:
             self.com.transmit_canfd_async(record)
         else:
