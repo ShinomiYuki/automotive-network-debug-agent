@@ -1,0 +1,4 @@
+interface:
+  display_name: "10 ms 报文独立邮箱配置"
+  short_description: "依据源码与 DBC 配置独立发送邮箱、CanIf 引用及 BswM 首帧放行条件"
+  default_prompt: "使用 $autosar-tx-mailbox，根据工程源码、DBC 和问题清单生成独立发送邮箱配置，并列出网段和报文 ID。"
